@@ -1,0 +1,40 @@
+# Environment
+.env
+.env.local
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs / cache
+*.log
+.cache/
+gradio_cached_examples/
+flagged/
+
+# Large data (개발 시 임시 보관용)
+data/
+*.csv
+*.parquet
+*.feather
+embeddings/

@@ -1,0 +1,1103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF
+   xmlns="http://www.context-sync.com/ontology/news-app#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_S03">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#StructuralRuleSchema"/>
+    <rdfs:label>S03 ContextOmission schema</rdfs:label>
+    <externalRuleId>S03</externalRuleId>
+    <descriptionKo xml:lang="ko">표면 명제는 맞지만 필수 맥락을 생략해 결론을 왜곡하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_ContextOmission"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_PolicyDebate"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_context_omission"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_structural"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.82</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.79</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.64</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_S03"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#verdict_deviated">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Verdict"/>
+    <rdfs:label xml:lang="ko">기준 이탈</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_CrisisInflation">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>CrisisInflation</rdfs:label>
+    <rdfs:comment xml:lang="ko">위기 부풀리기 — 사안의 위험도를 실제보다 과대하게 묘사하여 공포심을 유발하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_CorporateScandal">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>CorporateScandal</rdfs:label>
+    <rdfs:comment xml:lang="ko">기업 스캔들 — 기업의 비리, 부패, 회계 부정 등과 관련된 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Climate">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Climate</rdfs:label>
+    <rdfs:comment xml:lang="ko">기후/환경 — 기후 변화, 환경 정책, 에너지 전환 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_M01">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>M01 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">근거 수준이 다른 주장을 동등한 양측 의견처럼 배치하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#externalRuleId">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">외부 규칙 ID</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_T03">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#TemporalRuleSchema"/>
+    <rdfs:label>T03 RetroactiveReframing schema</rdfs:label>
+    <externalRuleId>T03</externalRuleId>
+    <descriptionKo xml:lang="ko">과거 사건의 의미를 현재 논조에 맞게 소급 재구성하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_RetroactiveReframing"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_Judiciary"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_temporal_shift"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_temporal"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.82</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.8</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.63</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_T03"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Ontology"/>
+    <rdfs:label xml:lang="en">Context-Sync News App-Centered Ontology</rdfs:label>
+    <rdfs:comment xml:lang="en">Protege-compatible OWL skeleton for a news tone/coherence application. OWL stores the stable symbolic vocabulary and schema-level anchors; the 800 practical detection rules live in an external JSON ruleset consumed by the application rule engine.</rdfs:comment>
+    <version>app-centered-v1.0</version>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_T04">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#TemporalRuleSchema"/>
+    <rdfs:label>T04 SelectiveMemory schema</rdfs:label>
+    <externalRuleId>T04</externalRuleId>
+    <descriptionKo xml:lang="ko">유리한 과거 보도만 기억하고 불리한 과거 기준을 생략하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_SelectiveMemory"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_Election"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_temporal_shift"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_temporal"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.78</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.81</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.61</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_T04"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_S06">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#StructuralRuleSchema"/>
+    <rdfs:label>S06 EmotionalAppeal schema</rdfs:label>
+    <externalRuleId>S06</externalRuleId>
+    <descriptionKo xml:lang="ko">감정적 단서를 통해 검증보다 반응을 우선시키는 구조를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_EmotionalAppeal"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_WarSecurity"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_structural"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.79</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.82</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.52</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_S06"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#dim_frame_effect">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:label xml:lang="ko">프레임 효과 왜곡도</rdfs:label>
+    <thresholdLow rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">35</thresholdLow>
+    <thresholdMedium rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">64</thresholdMedium>
+    <thresholdHigh rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">85</thresholdHigh>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#constrainsFrame">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label xml:lang="ko">규칙이 제약하거나 감지하는 프레임</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#llmPromptRole">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">LLM 프롬프트에서의 역할</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#appFieldName">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">앱 데이터 모델 필드명</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_S04">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#StructuralRuleSchema"/>
+    <rdfs:label>S04 LogicalFallacy schema</rdfs:label>
+    <externalRuleId>S04</externalRuleId>
+    <descriptionKo xml:lang="ko">원인과 결과, 상관과 인과를 혼동하는 구조를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_LogicalFallacy"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_Diplomacy"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_structural"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.76</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.74</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.58</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_S04"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#requiresContext">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label xml:lang="ko">규칙이 요구하는 주제 맥락</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#thresholdLow">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="ko">낮음 임계값</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_M03">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#MetacognitiveRuleSchema"/>
+    <rdfs:label>M03 InstitutionalDistrust schema</rdfs:label>
+    <externalRuleId>M03</externalRuleId>
+    <descriptionKo xml:lang="ko">제도 불신을 정당한 비판과 구분하지 않고 증폭하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_InstitutionalDistrust"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_Judiciary"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_metacognitive"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.81</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.79</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.56</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_M03"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#positiveCue">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">탐지 양성 단서</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_TechnologyAI">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>TechnologyAI</rdfs:label>
+    <rdfs:comment xml:lang="ko">기술/AI — 인공지능, 디지털 기술, 플랫폼 규제 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_M02">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#MetacognitiveRuleSchema"/>
+    <rdfs:label>M02 PartisanBias schema</rdfs:label>
+    <externalRuleId>M02</externalRuleId>
+    <descriptionKo xml:lang="ko">동일한 행위를 진영별로 다르게 평가하는 기준 비대칭을 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_PartisanBias"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_Election"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_metacognitive"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.85</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.84</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.57</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_M02"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_S01">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#StructuralRuleSchema"/>
+    <rdfs:label>S01 UnverifiedClaim schema</rdfs:label>
+    <externalRuleId>S01</externalRuleId>
+    <descriptionKo xml:lang="ko">검증되지 않은 주장을 사실처럼 배치하는 구조를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_UnverifiedClaim"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_PublicHealth"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_EvidenceTransparency"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_evidence_quality"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_structural"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.86</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.83</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.65</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_S01"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#thresholdMedium">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="ko">중간 임계값</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#engine_context_sync_rule_engine">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#RuleEngine"/>
+    <rdfs:label xml:lang="en">Context-Sync Rule Engine</rdfs:label>
+    <evaluationFormula xml:lang="en">final_distortion = 0.38*temporal_shift + 0.27*frame_effect + 0.20*context_omission + 0.15*consensus_deviation; verdict thresholds: &lt;35 aligned, 35-64 caution, &gt;=65 deviated</evaluationFormula>
+    <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_aligned"/>
+    <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_caution"/>
+    <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_deviated"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ruleCount">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#ExternalRuleDataset"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+    <rdfs:label xml:lang="ko">규칙 수</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#dim_temporal_shift">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:label xml:lang="ko">과거-현재 논조 이동 강도</rdfs:label>
+    <thresholdLow rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">35</thresholdLow>
+    <thresholdMedium rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">65</thresholdMedium>
+    <thresholdHigh rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">82</thresholdHigh>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_M06">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#MetacognitiveRuleSchema"/>
+    <rdfs:label>M06 PreemptiveDiscrediting schema</rdfs:label>
+    <externalRuleId>M06</externalRuleId>
+    <descriptionKo xml:lang="ko">상대 주장을 검토하기 전에 동기/정체성을 문제 삼아 무력화하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_PreemptiveDiscrediting"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_PolicyDebate"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_PluralPublicReason"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_metacognitive"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.8</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.81</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.54</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_M06"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#Frame">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">기사의 논조가 작동시키는 프레임</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#dim_consensus_deviation">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:label xml:lang="ko">사회적 기준층 이탈도</rdfs:label>
+    <thresholdLow rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">35</thresholdLow>
+    <thresholdMedium rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">65</thresholdMedium>
+    <thresholdHigh rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">82</thresholdHigh>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#OntologyAnchor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">RAG가 검색해 LLM에 제공하는 기준 항목</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_S05">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>S05 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">특정 사례를 과표집해 집단지성의 오류를 유도하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_FalseBalance">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>FalseBalance</rdfs:label>
+    <rdfs:comment xml:lang="ko">허위 균형(양비론) — 근거 수준이 비대칭인 양측을 동등한 것처럼 병렬 배치하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#producesVerdict">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleEngine"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Verdict"/>
+    <rdfs:label xml:lang="ko">평가 엔진이 생성하는 최종 판정</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#containsArticle">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#ArticleSeries"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Article"/>
+    <rdfs:label xml:lang="ko">시리즈가 포함하는 기사</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_M06">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>M06 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">상대 주장을 검토하기 전에 동기/정체성을 문제 삼아 무력화하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#RuleSchema">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">외부 앱 규칙의 상위 스키마</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#hasFrame">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#NewsArtifact"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label xml:lang="ko">기사/시리즈가 작동시키는 프레임</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#suppliedByDataset">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#ExternalRuleDataset"/>
+    <rdfs:label xml:lang="ko">해당 스키마의 실제 규칙이 들어있는 외부 데이터셋</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_T03">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>T03 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">과거 사건의 의미를 현재 논조에 맞게 소급 재구성하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_ResponsibilityShift">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>ResponsibilityShift</rdfs:label>
+    <rdfs:comment xml:lang="ko">책임 전가 — 사건의 본질적 책임 주체를 가리고 제3자에게 책임을 떠넘기는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_M04">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#MetacognitiveRuleSchema"/>
+    <rdfs:label>M04 VictimBlaming schema</rdfs:label>
+    <externalRuleId>M04</externalRuleId>
+    <descriptionKo xml:lang="ko">원인 귀속과 대응 책임을 혼동해 피해자에게 책임을 전가하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_VictimBlaming"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_GenderConflict"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_ResponsibilitySeparation"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_metacognitive"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.89</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.87</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.53</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_M04"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_T02">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>T02 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">정책 평가 기준이 시점별로 바뀌었으나 평가 축 변화가 설명되지 않는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#riskWeightDefault">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="ko">기본 위험 가중치</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_CherryPicking">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>CherryPicking</rdfs:label>
+    <rdfs:comment xml:lang="ko">체리피킹(편향적 발췌) — 전체 증거 중 주장에 유리한 일부만 선택적으로 제시하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#descriptionKo">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">한국어 설명</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_T01">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#TemporalRuleSchema"/>
+    <rdfs:label>T01 SilentPivot schema</rdfs:label>
+    <externalRuleId>T01</externalRuleId>
+    <descriptionKo xml:lang="ko">과거 논조와 현재 논조의 차이가 큰데 전환 사유를 설명하지 않는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_SilentPivot"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_Election"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_StanceConsistency"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_temporal_shift"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_temporal"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.92</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.88</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.72</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_T01"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#DetectionSignature">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">LLM/RAG 판독에 주입되는 탐지 시그니처</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ExternalRuleDataset">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">앱이 읽는 외부 규칙 데이터셋</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#belongsToLayer">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#AxiomLayer"/>
+    <rdfs:label xml:lang="ko">기준 항목이 속하는 symbolic layer</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Labor">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Labor</rdfs:label>
+    <rdfs:comment xml:lang="ko">노동 — 고용, 노사관계, 근로조건 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_NeutralFact">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>NeutralFact</rdfs:label>
+    <rdfs:comment xml:lang="ko">중립적 사실 보도 — 왜곡 프레임 없이 사실을 있는 그대로 전달하는 프레임 (기준선)</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_T05">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>T05 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">역사적 맥락이나 선행 조건을 삭제해 현재 판단만 절대화하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_T02">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#TemporalRuleSchema"/>
+    <rdfs:label>T02 SilentPivot schema</rdfs:label>
+    <externalRuleId>T02</externalRuleId>
+    <descriptionKo xml:lang="ko">정책 평가 기준이 시점별로 바뀌었으나 평가 축 변화가 설명되지 않는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_SilentPivot"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_PolicyDebate"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_StanceConsistency"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_temporal_shift"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_temporal"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.87</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.84</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.68</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_T02"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#StructuralRuleSchema">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">표면 명제와 구조적 효과를 다루는 규칙 스키마</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ArticleSeries">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">동일 사안에 대한 기사 묶음 또는 시계열</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#NewsArtifact"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#dim_context_omission">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:label xml:lang="ko">맥락 생략 위험</rdfs:label>
+    <thresholdLow rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">30</thresholdLow>
+    <thresholdMedium rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">60</thresholdMedium>
+    <thresholdHigh rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">80</thresholdHigh>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#anchoredByValue">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="ko">규칙이 참조하는 가치 기준</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#comparesAgainst">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#Article"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Article"/>
+    <rdfs:label xml:lang="ko">시계열 정합성 비교 대상</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_StanceConsistency">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="en">StanceConsistency</rdfs:label>
+    <descriptionKo xml:lang="ko">같은 매체가 같은 사안에 대해 논조를 바꿀 때 설명 책임을 요구하는 기준</descriptionKo>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_S03">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>S03 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">표면 명제는 맞지만 필수 맥락을 생략해 결론을 왜곡하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#distortionWeightDefault">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="ko">기본 왜곡 가중치</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_M04">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>M04 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">원인 귀속과 대응 책임을 혼동해 피해자에게 책임을 전가하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_InstitutionalDistrust">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>InstitutionalDistrust</rdfs:label>
+    <rdfs:comment xml:lang="ko">제도적 불신 — 구체적 근거 없이 제도 자체에 대한 불신을 조장하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_FairnessDiscourse">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>FairnessDiscourse</rdfs:label>
+    <rdfs:comment xml:lang="ko">공정성 담론 — 공정성을 표면적으로 내세우면서 실제로는 특정 방향을 정당화하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#Article">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">단일 뉴스 기사</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#NewsArtifact"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_T05">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#TemporalRuleSchema"/>
+    <rdfs:label>T05 HistoricalAmnesia schema</rdfs:label>
+    <externalRuleId>T05</externalRuleId>
+    <descriptionKo xml:lang="ko">역사적 맥락이나 선행 조건을 삭제해 현재 판단만 절대화하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_HistoricalAmnesia"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_WarSecurity"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_StanceConsistency"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_temporal_shift"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_temporal"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.8</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.77</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.59</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_T05"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Election">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Election</rdfs:label>
+    <rdfs:comment xml:lang="ko">선거 — 선거 캠페인, 후보자 평가, 투표 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#signaturePrompt">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">LLM에 주입할 탐지 설명</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_S01">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>S01 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">검증되지 않은 주장을 사실처럼 배치하는 구조를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_M05">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#MetacognitiveRuleSchema"/>
+    <rdfs:label>M05 ResponsibilityShift schema</rdfs:label>
+    <externalRuleId>M05</externalRuleId>
+    <descriptionKo xml:lang="ko">책임 주체를 구조에서 개인 또는 주변부로 이동시키는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_ResponsibilityShift"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_CorporateScandal"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_ResponsibilitySeparation"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_consensus_deviation"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_metacognitive"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.84</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.83</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.55</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_M05"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#hasDetectionSignature">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label xml:lang="ko">규칙을 LLM/RAG에 설명하는 탐지 시그니처</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#calibratesDimension">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:label xml:lang="ko">가치 기준이 보정하는 평가 차원</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_S05">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#StructuralRuleSchema"/>
+    <rdfs:label>S05 OverSampling schema</rdfs:label>
+    <externalRuleId>S05</externalRuleId>
+    <descriptionKo xml:lang="ko">특정 사례를 과표집해 집단지성의 오류를 유도하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_OverSampling"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_GenderConflict"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_PluralPublicReason"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_structural"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.88</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.86</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.55</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_S05"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#Verdict">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">최종 판정 범주</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#hasTopic">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#NewsArtifact"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label xml:lang="ko">기사/시리즈를 주제와 연결</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_S02">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#StructuralRuleSchema"/>
+    <rdfs:label>S02 CherryPicking schema</rdfs:label>
+    <externalRuleId>S02</externalRuleId>
+    <descriptionKo xml:lang="ko">전체 분포 대신 일부 사례만 전면화하는 구조를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_CherryPicking"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_CorporateScandal"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_context_omission"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_structural"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.83</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.82</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.6</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_S02"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_M03">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>M03 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">제도 불신을 정당한 비판과 구분하지 않고 증폭하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_S04">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>S04 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">원인과 결과, 상관과 인과를 혼동하는 구조를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ValueAnchor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">흔들리지 않는 기준층으로 쓰는 가치/정합성 기준</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_ConflictAmplification">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>ConflictAmplification</rdfs:label>
+    <rdfs:comment xml:lang="ko">갈등 증폭 — 사안의 대립 구도를 실제보다 과장하여 긴장감을 높이는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_PartisanBias">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>PartisanBias</rdfs:label>
+    <rdfs:comment xml:lang="ko">정파적 편향 — 동일 행위를 진영에 따라 다른 기준으로 평가하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#dim_evidence_quality">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:label xml:lang="ko">근거 투명성 부족</rdfs:label>
+    <thresholdLow rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">40</thresholdLow>
+    <thresholdMedium rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">70</thresholdMedium>
+    <thresholdHigh rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">90</thresholdHigh>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_FrameAccountability">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="en">FrameAccountability</rdfs:label>
+    <descriptionKo xml:lang="ko">문장이 만들어내는 실제 사회적 프레임 효과까지 평가해야 한다는 기준</descriptionKo>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="en">ContextCompleteness</rdfs:label>
+    <descriptionKo xml:lang="ko">표면 사실이 전체 맥락을 과도하게 생략하지 않아야 한다는 기준</descriptionKo>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ResponsibilitySeparation">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="en">ResponsibilitySeparation</rdfs:label>
+    <descriptionKo xml:lang="ko">잘못의 원인 귀속과 대응 책임을 분리해 평가하는 기준</descriptionKo>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_LocalPolitics">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>LocalPolitics</rdfs:label>
+    <rdfs:comment xml:lang="ko">지방정치 — 지방자치, 지역 의회, 지방선거 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#schema_M01">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#MetacognitiveRuleSchema"/>
+    <rdfs:label>M01 FalseBalance schema</rdfs:label>
+    <externalRuleId>M01</externalRuleId>
+    <descriptionKo xml:lang="ko">근거 수준이 다른 주장을 동등한 양측 의견처럼 배치하는 경우를 감지한다.</descriptionKo>
+    <constrainsFrame rdf:resource="http://www.context-sync.com/ontology/news-app#frame_FalseBalance"/>
+    <requiresContext rdf:resource="http://www.context-sync.com/ontology/news-app#ctx_PublicHealth"/>
+    <anchoredByValue rdf:resource="http://www.context-sync.com/ontology/news-app#val_PluralPublicReason"/>
+    <measuresDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_consensus_deviation"/>
+    <suppliedByDataset rdf:resource="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800"/>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_metacognitive"/>
+    <riskWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.78</riskWeightDefault>
+    <distortionWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.75</distortionWeightDefault>
+    <consensusWeightDefault rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.58</consensusWeightDefault>
+    <hasDetectionSignature rdf:resource="http://www.context-sync.com/ontology/news-app#sig_M01"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#TemporalRuleSchema">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">시계열 논조 이동을 다루는 규칙 스키마</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#intendedUse">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">사용 목적</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_S06">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>S06 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">감정적 단서를 통해 검증보다 반응을 우선시키는 구조를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Education">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Education</rdfs:label>
+    <rdfs:comment xml:lang="ko">교육 — 교육 정책, 대학, 입시, 학교 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#verdict_aligned">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Verdict"/>
+    <rdfs:label xml:lang="ko">기준 부합</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#measuresDimension">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:label xml:lang="ko">규칙이 점수화하는 차원</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#TemporalContext">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">시계열 비교가 필요한 맥락</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#EvaluationDimension">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">점수화되는 평가 차원</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_HistoricalAmnesia">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>HistoricalAmnesia</rdfs:label>
+    <rdfs:comment xml:lang="ko">역사적 망각 — 과거 유사 사례나 전례를 무시하고 현재만 극적으로 부각하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#MetacognitiveRuleSchema">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">메타인지, 책임 위치, 침투 효과를 다루는 규칙 스키마</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#layer_metacognitive">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#AxiomLayer"/>
+    <rdfs:label xml:lang="ko">메타인지/책임 위치 기준층</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#dataset_news_rules_800">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ExternalRuleDataset"/>
+    <rdfs:label>news_rules_800.json</rdfs:label>
+    <externalRuleFile>news_rules_800.json</externalRuleFile>
+    <ruleCount rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">800</ruleCount>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Diplomacy">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Diplomacy</rdfs:label>
+    <rdfs:comment xml:lang="ko">외교 — 국제관계, 외교 협상, 동맹 관계 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#consensusWeightDefault">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleSchema"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="ko">기본 합의도 보정 가중치</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#externalRuleFile">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#ExternalRuleDataset"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">외부 규칙 파일 경로</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_T04">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>T04 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">유리한 과거 보도만 기억하고 불리한 과거 기준을 생략하는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_LogicalFallacy">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>LogicalFallacy</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_RetroactiveReframing">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>RetroactiveReframing</rdfs:label>
+    <rdfs:comment xml:lang="ko">소급 재해석 — 과거 사건의 의미를 현재 서사에 맞게 재구성하면서 원래 맥락을 생략하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_T01">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>T01 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">과거 논조와 현재 논조의 차이가 큰데 전환 사유를 설명하지 않는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_S02">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>S02 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">전체 분포 대신 일부 사례만 전면화하는 구조를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#Topic">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">기사의 사안/주제 영역</rdfs:label>
+    <rdfs:subClassOf rdf:resource="http://www.context-sync.com/ontology/news-app#OntologyAnchor"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_PolicyDebate">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>PolicyDebate</rdfs:label>
+    <rdfs:comment xml:lang="ko">정책 토론 — 정부 정책의 수립, 시행, 평가에 관한 논의</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#version">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">버전</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#negativeIndicator">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">예외/감점 단서</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#hasTemporalPredecessor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#Article"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Article"/>
+    <rdfs:label xml:lang="ko">동일 사안의 과거 기사와 연결</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ToneTrajectory">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">시계열 논조 궤적</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Housing">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Housing</rdfs:label>
+    <rdfs:comment xml:lang="ko">주거 — 부동산, 주거 정책, 임대차 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_EvidenceTransparency">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="en">EvidenceTransparency</rdfs:label>
+    <descriptionKo xml:lang="ko">주장의 근거와 출처가 식별 가능해야 한다는 기준</descriptionKo>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#evaluationFormula">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#RuleEngine"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="ko">앱 내부 평가 수식 설명</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_VictimBlaming">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>VictimBlaming</rdfs:label>
+    <rdfs:comment xml:lang="ko">피해자 비난 — 피해자의 행동/특성을 부각하여 가해 구조에 대한 주의를 분산시키는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_M05">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>M05 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">책임 주체를 구조에서 개인 또는 주변부로 이동시키는 경우를 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#layer_structural">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#AxiomLayer"/>
+    <rdfs:label xml:lang="ko">구조적 프레임 효과 기준층</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#AxiomLayer">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">온톨로지가 제공하는 symbolic anchor 층위</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_GenderConflict">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>GenderConflict</rdfs:label>
+    <rdfs:comment xml:lang="ko">젠더 갈등 — 성별 갈등, 성범죄, 젠더 정책 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ScoreComponent">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">평가 점수의 구성 요소</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_SilentPivot">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>SilentPivot</rdfs:label>
+    <rdfs:comment xml:lang="ko">조용한 입장 전환 — 동일 매체가 동일 사안의 논조를 설명 없이 바꾸는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#Outlet">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">언론사 또는 발행 주체</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Economy">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Economy</rdfs:label>
+    <rdfs:comment xml:lang="ko">경제 — 경기, 물가, 금리, 산업 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#thresholdHigh">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#EvaluationDimension"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="ko">높음 임계값</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_PluralPublicReason">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="en">PluralPublicReason</rdfs:label>
+    <descriptionKo xml:lang="ko">단순 다수결이 아니라 다양한 의견이 구조적으로 반영되어야 한다는 기준</descriptionKo>
+    <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#publishedBy">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#Article"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Outlet"/>
+    <rdfs:label xml:lang="ko">기사를 발행 주체와 연결</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#RuleEngine">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">외부 규칙을 실행하고 점수화하는 앱 엔진</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#EvidenceSpan">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">기사 내 판단 근거가 되는 문장/구절</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#evaluatedByEngine">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#NewsArtifact"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#RuleEngine"/>
+    <rdfs:label xml:lang="ko">뉴스 객체를 평가하는 앱 엔진</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#AxiomLayer"/>
+    <rdfs:label xml:lang="ko">국가 의미 인프라를 대체하는 임시 사회 의미 기준층</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#StanceVector">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">기사 또는 기사 묶음의 논조 벡터</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_M02">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
+    <rdfs:label>M02 detection signature</rdfs:label>
+    <signaturePrompt xml:lang="ko">동일한 행위를 진영별로 다르게 평가하는 기준 비대칭을 감지한다. 과거 기사, 현재 기사, 누락된 전환 설명, 예외 사유를 분리해 판단한다.</signaturePrompt>
+    <positiveCue xml:lang="ko">동일 사안 반복 보도, 평가 기준 변화, 선택적 사례 전면화, 설명 없는 가치 이동</positiveCue>
+    <negativeIndicator xml:lang="ko">새로운 증거, 명시적 정정, 조건 변화의 충분한 설명, 반론의 균형 있는 제시</negativeIndicator>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_WarSecurity">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>WarSecurity</rdfs:label>
+    <rdfs:comment xml:lang="ko">전쟁/안보 — 군사, 국방, 안보 위협 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_OverSampling">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>OverSampling</rdfs:label>
+    <rdfs:comment xml:lang="ko">과잉 표집 — 소수의 극단적 사례를 과도하게 노출하여 전체의 경향성으로 일반화하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#NewsArtifact">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="ko">뉴스 평가의 대상이 되는 정보 객체의 상위 클래스</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Judiciary">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Judiciary</rdfs:label>
+    <rdfs:comment xml:lang="ko">사법 — 재판, 판결, 검찰, 법원 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Welfare">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>Welfare</rdfs:label>
+    <rdfs:comment xml:lang="ko">복지 — 사회복지, 연금, 의료보장 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_PublicHealth">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
+    <rdfs:label>PublicHealth</rdfs:label>
+    <rdfs:comment xml:lang="ko">공중보건 — 감염병, 의료 정책, 백신 관련 주제</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#layer_temporal">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#AxiomLayer"/>
+    <rdfs:label xml:lang="ko">시계열 정합성 기준층</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_ContextOmission">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>ContextOmission</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_SelectiveMemory">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>SelectiveMemory</rdfs:label>
+    <rdfs:comment xml:lang="ko">선택적 회상 — 현재 논조에 유리한 과거 보도만 인용하고 불리한 보도는 생략하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_UnverifiedClaim">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>UnverifiedClaim</rdfs:label>
+    <rdfs:comment xml:lang="ko">미검증 주장 — 출처가 불분명하거나 검증되지 않은 사실을 단정적으로 보도하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_EmotionalAppeal">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>EmotionalAppeal</rdfs:label>
+    <rdfs:comment xml:lang="ko">감정 호소 — 객관적 근거 대신 자극적 어휘와 감정에 의존하여 판단을 방해하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#verdict_caution">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Verdict"/>
+    <rdfs:label xml:lang="ko">주의 필요</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#frame_PreemptiveDiscrediting">
+    <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label>PreemptiveDiscrediting</rdfs:label>
+    <rdfs:comment xml:lang="ko">선제적 깎아내리기 — 반론 출처를 내용 검토 전에 동기/정체성으로 공격하여 무력화하는 프레임</rdfs:comment>
+  </rdf:Description>
+  <!-- ================================================================ -->
+  <!-- VALUE-RELATIONAL EXTENSIONS (v2 patch)                             -->
+  <!--                                                                    -->
+  <!-- 두 종류의 관계를 추가:                                             -->
+  <!-- 1. reinforces (Value -> Value): 같은 메타 가치의 다른 측면들을     -->
+  <!--    그래프에서 강화 관계로 명시                                     -->
+  <!-- 2. conflictsWith (Value -> Frame): ValueAnchor가 어떤 Frame과       -->
+  <!--    구조적으로 충돌하는지 명시 (이것이 시계열 정합성 검증의 핵심)   -->
+  <!-- ================================================================ -->
+
+  <!-- ObjectProperty 정의 -->
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#reinforces">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#SymmetricProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:label xml:lang="ko">강화 관계</rdfs:label>
+    <rdfs:comment xml:lang="ko">두 ValueAnchor가 같은 메타 가치의 다른 측면임을 나타낸다. 충돌이 아니라 상호 강화.</rdfs:comment>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#conflictsWith">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
+    <rdfs:range rdf:resource="http://www.context-sync.com/ontology/news-app#Frame"/>
+    <rdfs:label xml:lang="ko">구조적 충돌 관계</rdfs:label>
+    <rdfs:comment xml:lang="ko">ValueAnchor가 그 Frame과 구조적으로 양립할 수 없음을 나타낸다. 시계열 비교에서, 과거 텍스트가 옹호한 Value를 현재 텍스트의 Frame이 위반하면 정합성 위반으로 본다.</rdfs:comment>
+  </rdf:Description>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- reinforces (Value -> Value): 강화 관계                -->
+  <!-- 모든 ValueAnchor는 메타 가치 "보도 정합성"의 측면이므로 -->
+  <!-- 서로를 강화하는 구조. 핵심 강화 관계만 명시.            -->
+  <!-- ─────────────────────────────────────────────────── -->
+
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_StanceConsistency">
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_EvidenceTransparency"/>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness">
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_EvidenceTransparency"/>
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_ResponsibilitySeparation"/>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_PluralPublicReason">
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness"/>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ResponsibilitySeparation">
+    <reinforces rdf:resource="http://www.context-sync.com/ontology/news-app#val_FrameAccountability"/>
+  </rdf:Description>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <!-- conflictsWith (Value -> Frame): 구조적 충돌 관계      -->
+  <!-- 이것이 시계열 정합성 검증의 그래프 추론 근거가 된다.   -->
+  <!-- ─────────────────────────────────────────────────── -->
+
+  <!-- StanceConsistency: 시계열 설명 책임 -->
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_StanceConsistency">
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_SilentPivot"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_RetroactiveReframing"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_SelectiveMemory"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_HistoricalAmnesia"/>
+  </rdf:Description>
+
+  <!-- ContextCompleteness: 맥락 완결성 -->
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness">
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_ContextOmission"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_HistoricalAmnesia"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_CherryPicking"/>
+  </rdf:Description>
+
+  <!-- EvidenceTransparency: 근거 투명성 -->
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_EvidenceTransparency">
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_UnverifiedClaim"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_CherryPicking"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_PreemptiveDiscrediting"/>
+  </rdf:Description>
+
+  <!-- FrameAccountability: 프레임 효과 평가 -->
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_FrameAccountability">
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_EmotionalAppeal"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_LogicalFallacy"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_CrisisInflation"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_OverSampling"/>
+  </rdf:Description>
+
+  <!-- ResponsibilitySeparation: 책임 분리 -->
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ResponsibilitySeparation">
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_VictimBlaming"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_ResponsibilityShift"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_ConflictAmplification"/>
+  </rdf:Description>
+
+  <!-- PluralPublicReason: 다양성의 구조적 반영 -->
+  <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_PluralPublicReason">
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_FalseBalance"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_PartisanBias"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_PreemptiveDiscrediting"/>
+    <conflictsWith rdf:resource="http://www.context-sync.com/ontology/news-app#frame_InstitutionalDistrust"/>
+  </rdf:Description>
+
+</rdf:RDF>
