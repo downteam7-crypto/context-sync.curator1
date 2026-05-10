@@ -474,6 +474,7 @@
     <rdfs:label xml:lang="en">StanceConsistency</rdfs:label>
     <descriptionKo xml:lang="ko">같은 매체가 같은 사안에 대해 논조를 바꿀 때 설명 책임을 요구하는 기준</descriptionKo>
     <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+    <calibratesDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_temporal_shift"/>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#sig_S03">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#DetectionSignature"/>
@@ -655,18 +656,22 @@
     <rdfs:label xml:lang="en">FrameAccountability</rdfs:label>
     <descriptionKo xml:lang="ko">문장이 만들어내는 실제 사회적 프레임 효과까지 평가해야 한다는 기준</descriptionKo>
     <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+    <calibratesDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ContextCompleteness">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
     <rdfs:label xml:lang="en">ContextCompleteness</rdfs:label>
     <descriptionKo xml:lang="ko">표면 사실이 전체 맥락을 과도하게 생략하지 않아야 한다는 기준</descriptionKo>
     <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+    <calibratesDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_context_omission"/>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#val_ResponsibilitySeparation">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#ValueAnchor"/>
     <rdfs:label xml:lang="en">ResponsibilitySeparation</rdfs:label>
     <descriptionKo xml:lang="ko">잘못의 원인 귀속과 대응 책임을 분리해 평가하는 기준</descriptionKo>
     <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+    <calibratesDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_frame_effect"/>
+    <calibratesDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_consensus_deviation"/>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_LocalPolitics">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
@@ -838,6 +843,7 @@
     <rdfs:label xml:lang="en">EvidenceTransparency</rdfs:label>
     <descriptionKo xml:lang="ko">주장의 근거와 출처가 식별 가능해야 한다는 기준</descriptionKo>
     <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+    <calibratesDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_evidence_quality"/>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#evaluationFormula">
     <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
@@ -899,6 +905,7 @@
     <rdfs:label xml:lang="en">PluralPublicReason</rdfs:label>
     <descriptionKo xml:lang="ko">단순 다수결이 아니라 다양한 의견이 구조적으로 반영되어야 한다는 기준</descriptionKo>
     <belongsToLayer rdf:resource="http://www.context-sync.com/ontology/news-app#layer_social_meaning_proxy"/>
+    <calibratesDimension rdf:resource="http://www.context-sync.com/ontology/news-app#dim_consensus_deviation"/>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#publishedBy">
     <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>

@@ -34,7 +34,53 @@ LLM의 맥락 판단 능력 위에 온톨로지의 고정된 기준층을 결합
 | `EvidenceTransparency` | 주장의 근거와 출처가 식별 가능해야 함 |
 | `PluralPublicReason` | 단순 다수결이 아니라 다양한 의견이 *구조적*으로 반영되는 기준 |
 
+각 ValueAnchor는 OWL의 `calibratesDimension` 관계로 5개의 EvaluationDimension에 연결된다. 이 매핑이 *Value 위반*이 *어느 점수 차원으로 반영되어야 하는가*를 그래프 추론으로 답한다.
+
+| ValueAnchor | calibrates → EvaluationDimension |
+|---|---|
+| `StanceConsistency` | `temporal_shift` |
+| `FrameAccountability` | `frame_effect` |
+| `ContextCompleteness` | `context_omission` |
+| `ResponsibilitySeparation` | `frame_effect` + `consensus_deviation` (이중 매핑) |
+| `EvidenceTransparency` | `evidence_quality` |
+| `PluralPublicReason` | `consensus_deviation` |
+
+이 연결을 통해 앱은 *"이 기사는 ContextCompleteness 기준을 위반했기 때문에 context_omission 차원에서 점수가 깎였다"*는 식의 **그래프 추론으로 도출된 설명 가능한 판정**을 만들 수 있다.
+
 또한 4개의 AxiomLayer 중 `layer_social_meaning_proxy`는, 페르소나 자료에서 비전으로 제시한 **국가 의미 인프라**를 본 프로토타입에서 임시 대체하는 기준층으로 명시되어 있다. 즉 본 프로젝트는 *"지금 무엇을 임시로 대체하고 있고, 궁극적으로 어디로 가야 하는가"*가 어휘 자체에 박혀 있다.
+
+### OWL의 역할: 의미 기준층 vs 계산 엔진
+
+본 OWL은 **점수를 계산하는 엔진이 아니라 의미 기준층**이다. 자주 오해가 발생하는 지점을 명확히 해두면:
+
+- **OWL이 하는 일** — 어휘(클래스, ValueAnchor, Frame, Topic)와 그 관계(`conflictsWith`, `reinforces`, `calibratesDimension`)를 선언한다. 또한 `evaluationFormula` 같은 *수식 메타데이터*를 `RuleEngine` 클래스 위에 *문자열로 보관*한다.
+- **OWL이 하지 않는 일** — 점수 계산 자체. OWL은 *어떤 차원으로 어떻게 가중되어야 하는지*를 *선언*하지만, 실제 산수는 Python 측 `audit_logic` 함수가 수행한다.
+- **외부 JSON 룰셋** — 800개의 실무 검출 규칙을 보관한다. OWL의 RuleSchema가 추상 어휘를 제공하고, JSON이 그 어휘에 속하는 구체적 룰들을 공급하는 분리.
+
+따라서 본 프로젝트의 부동성 기준층은 단일 파일이 아니라 **OWL(어휘·관계 선언) + JSON(실무 규칙) + Python(계산 실행)의 3층 분리 구조**다. 이 분리가 *"공리를 80개에서 800개로 늘리면 정교해질까"*에 대한 응답이며, 동시에 *각 층이 무엇을 책임지는지*를 명확히 한다.
+
+### JSON 룰셋과 OWL 매핑의 관계
+
+`news_rules_800.json`의 800개 룰은 OWL의 어휘를 사용하지만, 두 자원의 *역할이 다르다*는 점을 명시해둔다.
+
+**ValueAnchor 분포** — 800개 룰은 5개 ValueAnchor 기반으로 분포되어 있다.
+
+| ValueAnchor | 룰 수 |
+|---|---|
+| `ContextCompleteness` | 256 |
+| `StanceConsistency` | 192 |
+| `FrameAccountability` | 160 |
+| `PluralPublicReason` | 128 |
+| `EvidenceTransparency` | 64 |
+| `ResponsibilitySeparation` | 0 |
+
+6번째인 `ResponsibilitySeparation`은 본 룰셋에서는 사용되지 않으며, **OWL 그래프 추론(Stage 3) 단에서만 작동**한다. 이는 *책임 분리*가 단일 룰 단위가 아니라 *전체 텍스트의 책임 위치 평가*에서만 의미가 있다는 설계 선택이다. 즉 룰 매칭으로는 잡기 어렵고, *과거 옹호 가치 ↔ 현재 프레임* 같은 텍스트 간 관계 추론으로만 잡힌다.
+
+**dimension 매핑의 두 층위** — 일부 룰(약 24%)은 OWL의 `calibratesDimension` 기본 매핑과 다른 dimension 필드를 가진다. 예를 들어 `ContextCompleteness`는 OWL에서 `context_omission`을 보정한다고 선언되어 있지만, 일부 룰은 `temporal_shift` 차원에서 측정되도록 정의되어 있다.
+
+이는 *"같은 가치를 다른 차원으로 측정하는 개별 케이스"*로 해석할 수 있다. **OWL은 *기본(prior) 매핑*을 제공하고, JSON은 *개별 룰의 측정 차원*을 명시하는 구조**다. 본 코드의 `audit_logic`은 두 층위를 모두 활용한다 — Stage 3에서는 OWL의 기본 매핑으로 그래프 추론을, Stage 4에서는 JSON 룰의 개별 dimension으로 룰 매칭을 수행한다.
+
+**룰셋의 생성 방식** — 800개 룰은 17개 RuleSchema(T01~T05, S01~S06, M01~M06)와 12개 target_frame, 16개 context, 4개 severity 단계의 조합으로 *체계적으로 생성*되었다. `severity_band`는 4단계(low/medium/high/critical)에 200개씩 균등 분포되어 있어, *현실 빈도 기반 가중치가 아닌 시연용 대표 분포*임을 밝혀둔다. 향후 실제 보도 코퍼스 분석을 통한 빈도 보정이 보강 방향이다.
 
 ## 페르소나 / 컨텍스트 자료
 

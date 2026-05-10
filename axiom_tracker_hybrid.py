@@ -349,6 +349,35 @@ def check_value_reinforces(vocab: OntologyVocabulary, value_a: str, value_b: str
         return False
 
 
+def get_calibrated_dimensions(vocab: OntologyVocabulary, value: str) -> List[str]:
+    """OWL의 calibratesDimension 관계로 ValueAnchor가 보정하는 평가 차원 조회.
+
+    각 ValueAnchor는 어떤 EvaluationDimension을 보정하는지 OWL에 명시되어 있다.
+    이를 통해 *Value 위반*이 *어느 점수 차원으로 반영되어야 하는가*를 그래프에서
+    직접 추론할 수 있다.
+    """
+    if not vocab.loaded or not value:
+        return []
+
+    q = f"""
+    PREFIX cs: <http://www.context-sync.com/ontology/news-app#>
+    SELECT ?dim WHERE {{
+        cs:val_{value} cs:calibratesDimension ?dim .
+    }}
+    """
+    try:
+        results = vocab.graph.query(q)
+        # IRI에서 dim_ prefix 제거하고 차원 이름만 추출
+        dims = []
+        for row in results:
+            iri = str(row.dim)
+            if "#dim_" in iri:
+                dims.append(iri.split("#dim_")[-1])
+        return dims
+    except Exception:
+        return []
+
+
 def audit_logic(
     past: ExtractedSymbol,
     present: ExtractedSymbol,
@@ -370,6 +399,15 @@ def audit_logic(
         "score": 100,
         "reasons": [],
         "fired_rules": [],
+        # OWL의 calibratesDimension 관계로 추론된 차원별 점수 분해.
+        # 각 ValueAnchor 위반이 어느 EvaluationDimension에 반영되었는지를 기록.
+        "dimension_breakdown": {
+            "temporal_shift": 0,
+            "frame_effect": 0,
+            "context_omission": 0,
+            "consensus_deviation": 0,
+            "evidence_quality": 0,
+        },
         "details": {
             "past": past.model_dump(),
             "present": present.model_dump(),
@@ -424,41 +462,70 @@ def audit_logic(
     #       구조적 위반인가
     # ─────────────────────────────────────
 
+    # 헬퍼: penalty를 calibrate된 차원에 분배
+    # 한 Value가 여러 차원을 calibrate하면 페널티를 균등 분배
+    def _distribute_to_dimensions(value: str, penalty: int) -> str:
+        """ValueAnchor의 위반 페널티를 OWL calibratesDimension 그래프로
+        추론한 차원들에 분배 기록한다. 어느 차원에도 매핑되지 않으면 무시.
+
+        반환: 분배된 차원들의 한국어 요약 (reasons에 추가하기 위해).
+        """
+        if not value or penalty == 0:
+            return ""
+        dims = get_calibrated_dimensions(vocab, value)
+        if not dims:
+            return ""
+        per_dim_penalty = penalty / len(dims)  # 음수 페널티
+        for d in dims:
+            if d in report["dimension_breakdown"]:
+                report["dimension_breakdown"][d] += per_dim_penalty
+        return f" → calibrated dimensions: {', '.join(dims)}"
+
     # 3a. Value ↔ Frame 충돌 검사 (양방향 + 교차)
     # 가장 의미 있는 케이스: 과거 옹호 가치를 현재 프레임이 위반
     if past.promoted_value and present.detected_frame and present.detected_frame != "None":
         if check_value_frame_conflict(vocab, past.promoted_value, present.detected_frame):
             report["logic_conflict"] = True
-            report["logic_score"] -= 25
+            penalty = -25
+            report["logic_score"] += penalty
+            dim_note = _distribute_to_dimensions(past.promoted_value, penalty)
             report["reasons"].append(
                 f"OWL graph conflict (cross-temporal): PAST value '{past.promoted_value}' "
-                f"↔ PRESENT frame '{present.detected_frame}'"
+                f"↔ PRESENT frame '{present.detected_frame}'{dim_note}"
             )
 
     # 보조: 현재 옹호 가치를 현재 프레임이 위반 (자기 모순)
     if present.promoted_value and present.detected_frame and present.detected_frame != "None":
         if check_value_frame_conflict(vocab, present.promoted_value, present.detected_frame):
-            report["logic_score"] -= 15
+            penalty = -15
+            report["logic_score"] += penalty
+            dim_note = _distribute_to_dimensions(present.promoted_value, penalty)
             report["reasons"].append(
                 f"OWL graph conflict (self-contradictory): PRESENT value '{present.promoted_value}' "
-                f"↔ PRESENT frame '{present.detected_frame}' (text claims a value its frame undermines)"
+                f"↔ PRESENT frame '{present.detected_frame}' (text claims a value its frame undermines){dim_note}"
             )
 
     # 3b. 가치 이동의 성격 판별
     if past.promoted_value != present.promoted_value:
         if check_value_reinforces(vocab, past.promoted_value, present.promoted_value):
             # 강화 관계 → 강조점 이동, 가벼운 페널티
-            report["logic_score"] -= 3
+            penalty = -3
+            report["logic_score"] += penalty
+            # 강조점 이동은 두 가치 모두에 영향 → 두 가치의 calibrated 차원에 분배
+            _distribute_to_dimensions(past.promoted_value, penalty // 2)
+            _distribute_to_dimensions(present.promoted_value, penalty - penalty // 2)
             report["reasons"].append(
                 f"Value emphasis shift (within reinforcement relation): "
                 f"{past.promoted_value} ↔ {present.promoted_value}"
             )
         else:
             # 강화 관계도 아님 → 더 큰 이동, 검토 필요
-            report["logic_score"] -= 12
+            penalty = -12
+            report["logic_score"] += penalty
+            dim_note = _distribute_to_dimensions(past.promoted_value, penalty)
             report["reasons"].append(
                 f"Value shift (no OWL reinforces relation): "
-                f"{past.promoted_value} → {present.promoted_value}"
+                f"{past.promoted_value} → {present.promoted_value}{dim_note}"
             )
 
     # ─────────────────────────────────────
@@ -486,6 +553,12 @@ def audit_logic(
 
         severity_penalty = {"critical": -15, "high": -10, "medium": -6, "low": -3}.get(severity, -3)
         report["logic_score"] += severity_penalty
+
+        # 룰의 value_anchor가 보정하는 차원에 페널티 분배
+        rule_value = rule.get("value_anchor", "")
+        if rule_value:
+            _distribute_to_dimensions(rule_value, severity_penalty)
+
         report["fired_rules"].append({
             "rule_id": rule.get("rule_id"),
             "schema_id": rule.get("schema_id"),
@@ -499,6 +572,10 @@ def audit_logic(
     if report["fired_rules"]:
         rule_ids = [r["rule_id"] for r in report["fired_rules"]]
         report["reasons"].append(f"Fired {len(rule_ids)} rules: {', '.join(rule_ids[:5])}{'...' if len(rule_ids) > 5 else ''}")
+
+    # dimension_breakdown 정수화 (분배 시 소수가 들어갈 수 있음)
+    for d in report["dimension_breakdown"]:
+        report["dimension_breakdown"][d] = round(report["dimension_breakdown"][d], 1)
 
     # ─────────────────────────────────────
     # 최종 점수 (음수 방지)
@@ -543,6 +620,7 @@ def generate_report(client: OpenAI, audit: Dict[str, Any], model: str) -> RichRe
             "validity_score": audit["validity_score"],
             "logic_score": audit["logic_score"],
             "score": audit["score"],
+            "dimension_breakdown": audit.get("dimension_breakdown", {}),
             "reasons": audit["reasons"],
             "fired_rules": audit["fired_rules"],
             "past": {
@@ -645,10 +723,10 @@ def run_pipeline(
 # 8. Gradio UI
 # ==========================================
 
-def _count_graph_relations(vocab: OntologyVocabulary) -> Tuple[int, int]:
-    """그래프에서 conflictsWith / reinforces 관계 인스턴스 개수 카운트."""
+def _count_graph_relations(vocab: OntologyVocabulary) -> Tuple[int, int, int]:
+    """그래프에서 conflictsWith / reinforces / calibratesDimension 관계 인스턴스 개수 카운트."""
     if not vocab.loaded:
-        return 0, 0
+        return 0, 0, 0
     q_conflict = """
     PREFIX cs: <http://www.context-sync.com/ontology/news-app#>
     SELECT (COUNT(*) AS ?n) WHERE { ?v cs:conflictsWith ?f . }
@@ -657,25 +735,31 @@ def _count_graph_relations(vocab: OntologyVocabulary) -> Tuple[int, int]:
     PREFIX cs: <http://www.context-sync.com/ontology/news-app#>
     SELECT (COUNT(*) AS ?n) WHERE { ?a cs:reinforces ?b . }
     """
+    q_calibrate = """
+    PREFIX cs: <http://www.context-sync.com/ontology/news-app#>
+    SELECT (COUNT(*) AS ?n) WHERE { ?v cs:calibratesDimension ?d . }
+    """
     try:
         c = next(iter(vocab.graph.query(q_conflict)))
         r = next(iter(vocab.graph.query(q_reinforce)))
-        return int(c.n), int(r.n)
+        cd = next(iter(vocab.graph.query(q_calibrate)))
+        return int(c.n), int(r.n), int(cd.n)
     except Exception:
-        return 0, 0
+        return 0, 0, 0
 
 
 def build_ontology_status() -> str:
     """OWL/룰 로드 상태를 사이드 패널에 표시."""
     lines = ["### 시스템 상태"]
     if _VOCAB.loaded:
-        n_conflict, n_reinforce = _count_graph_relations(_VOCAB)
+        n_conflict, n_reinforce, n_calibrate = _count_graph_relations(_VOCAB)
         lines.append(f"- ✅ OWL: {len(_VOCAB.graph)} triples")
         lines.append(f"  - {len(_VOCAB.value_anchors)} ValueAnchor: `{', '.join(_VOCAB.value_anchors)}`")
         lines.append(f"  - {len(_VOCAB.frames)} Frame")
         lines.append(f"  - {len(_VOCAB.topics)} Topic")
         lines.append(f"  - **{n_conflict} conflictsWith** relations (Value ↔ Frame)")
         lines.append(f"  - **{n_reinforce} reinforces** relations (Value ↔ Value)")
+        lines.append(f"  - **{n_calibrate} calibratesDimension** relations (Value → EvaluationDimension)")
     else:
         lines.append(f"- ❌ OWL not loaded ({OWL_PATH})")
 
@@ -741,6 +825,13 @@ with gr.Blocks(title="Axiom Tracker — Hybrid Edition") as demo:
         "- `validity_score`: 사실/윤리 위배 (Red Card, 시계열 무관)\n"
         "- `logic_score`: 시계열 입장 변경 (OWL 관계 + 800 룰 발화)\n"
         "- `score = max(0, 100 + validity + logic)`\n\n"
+        "**차원별 분해 (`dimension_breakdown`)**: 각 ValueAnchor 위반 페널티가 OWL의 "
+        "`calibratesDimension` 관계로 5개 EvaluationDimension에 분배된다.\n"
+        "- `temporal_shift` ← StanceConsistency\n"
+        "- `frame_effect` ← FrameAccountability, ResponsibilitySeparation\n"
+        "- `context_omission` ← ContextCompleteness\n"
+        "- `consensus_deviation` ← PluralPublicReason, ResponsibilitySeparation\n"
+        "- `evidence_quality` ← EvidenceTransparency\n\n"
         "**발화된 룰**: `audit_out.fired_rules`에서 어떤 룰이 왜 발화했는지 확인 가능. "
         "리포트의 `evidence_rules`는 그중 핵심을 발췌."
     )
