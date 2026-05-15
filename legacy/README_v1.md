@@ -18,8 +18,8 @@ LLM의 맥락 판단 능력 위에 온톨로지의 고정된 기준층을 결합
 
 본 프로젝트의 부동성 기준층은 **스키마-룰셋 분리 구조**로 설계되어 있다.
 
-- **OWL 온톨로지** (`ontology/context_sync_app_centered_ontology.owl`): 17개의 추상 스키마, 6개의 ValueAnchor, 4개의 AxiomLayer, 5개의 EvaluationDimension, 20개의 Frame, 18개의 Topic 등 **느리게 변하는 보편 어휘**와, 그 어휘 사이의 **그래프 관계**(21개 conflictsWith, 8개 reinforces, 7개 calibratesDimension)를 정의한다.
-- **외부 룰셋** (`ontology/news_rules_1024.json`): 위 스키마에 속하는 **1024개의 실무 검출 규칙**을 별도 파일로 관리한다. (v2.0.0-owl-expanded, M03·M05·M06 확장 반영)
+- **OWL 온톨로지** (`ontology/context_sync_app_centered_ontology.owl`): 17개의 추상 스키마, 6개의 ValueAnchor, 4개의 AxiomLayer, 5개의 EvaluationDimension, 17개의 Frame, 16개의 Topic 등 **느리게 변하는 보편 어휘**와, 그 어휘 사이의 **그래프 관계**(21개 conflictsWith, 8개 reinforces)를 정의한다.
+- **외부 룰셋** (`ontology/news_rules_800.json`): 위 스키마에 속하는 **800개의 실무 검출 규칙**을 별도 파일로 관리한다.
 
 이 분리는 페르소나 자료에서 제기한 *"공리를 80개가 아니라 800개, 8000개로 늘리면 정교해질까"*라는 질문에 대한 공학적 응답이다. 어휘를 무겁게 늘리는 대신, 추상 어휘는 OWL에 안정적으로 두고 실무 규칙은 외부 데이터셋으로 분리해 운용한다.
 
@@ -53,44 +53,34 @@ LLM의 맥락 판단 능력 위에 온톨로지의 고정된 기준층을 결합
 
 본 OWL은 **점수를 계산하는 엔진이 아니라 의미 기준층**이다. 자주 오해가 발생하는 지점을 명확히 해두면:
 
-- **OWL이 하는 일** — 어휘(클래스, ValueAnchor, Frame, Topic)와 그 관계(`conflictsWith`, `reinforces`, `calibratesDimension`)를 선언한다. 또한 `evaluationFormula`(5차원 가중 공식)와 `dimension_weights` 같은 *수식 메타데이터*를 `RuleEngine` 클래스 위에 *문자열로 보관*한다.
-- **OWL이 하지 않는 일** — 점수 계산 자체. OWL은 *어떤 차원으로 어떻게 가중되어야 하는지*를 *선언*하지만, 실제 산수는 Python 측 `audit_logic` 함수와 `compute_weighted_distortion`이 수행한다.
-- **외부 JSON 룰셋** — 1024개의 실무 검출 규칙을 보관한다. OWL의 RuleSchema가 추상 어휘를 제공하고, JSON이 그 어휘에 속하는 구체적 룰들을 공급하는 분리.
+- **OWL이 하는 일** — 어휘(클래스, ValueAnchor, Frame, Topic)와 그 관계(`conflictsWith`, `reinforces`, `calibratesDimension`)를 선언한다. 또한 `evaluationFormula` 같은 *수식 메타데이터*를 `RuleEngine` 클래스 위에 *문자열로 보관*한다.
+- **OWL이 하지 않는 일** — 점수 계산 자체. OWL은 *어떤 차원으로 어떻게 가중되어야 하는지*를 *선언*하지만, 실제 산수는 Python 측 `audit_logic` 함수가 수행한다.
+- **외부 JSON 룰셋** — 800개의 실무 검출 규칙을 보관한다. OWL의 RuleSchema가 추상 어휘를 제공하고, JSON이 그 어휘에 속하는 구체적 룰들을 공급하는 분리.
 
-따라서 본 프로젝트의 부동성 기준층은 단일 파일이 아니라 **OWL(어휘·관계 선언) + JSON(실무 규칙·가중치) + Python(계산 실행)의 3층 분리 구조**다. 이 분리가 *"공리를 80개에서 800개로, 다시 1024개로 늘리면 정교해질까"*에 대한 응답이며, 동시에 *각 층이 무엇을 책임지는지*를 명확히 한다.
-
-### 5차원 평가와 dimension_weights
-
-본 룰셋 v2.0.0부터 평가는 5개 EvaluationDimension의 가중합으로 정의된다. JSON 최상위에 명시된 `dimension_weights`가 Python의 점수 계산에 직접 반영된다.
-
-```
-final_distortion =
-    0.34 × temporal_shift
-  + 0.24 × frame_effect
-  + 0.18 × context_omission
-  + 0.14 × consensus_deviation
-  + 0.10 × evidence_quality
-```
-
-이 5번째 차원 `evidence_quality`는 *증거 부재로 인한 왜곡*을 *시간축 변화로 인한 왜곡*과 같은 무게로 다루지 않아야 한다는 자연스러운 분화의 결과다. `EvidenceTransparency` ValueAnchor가 이 차원으로 calibrate된다.
+따라서 본 프로젝트의 부동성 기준층은 단일 파일이 아니라 **OWL(어휘·관계 선언) + JSON(실무 규칙) + Python(계산 실행)의 3층 분리 구조**다. 이 분리가 *"공리를 80개에서 800개로 늘리면 정교해질까"*에 대한 응답이며, 동시에 *각 층이 무엇을 책임지는지*를 명확히 한다.
 
 ### JSON 룰셋과 OWL 매핑의 관계
 
-`news_rules_1024.json`의 1024개 룰은 OWL의 어휘를 사용하지만, 두 자원의 *역할이 다르다*는 점을 명시해둔다.
+`news_rules_800.json`의 800개 룰은 OWL의 어휘를 사용하지만, 두 자원의 *역할이 다르다*는 점을 명시해둔다.
 
-**ValueAnchor 분포** — 1024개 룰의 ValueAnchor 분포는 시계열·구조·메타 갈래에 걸쳐 균형 잡혀 있다.
+**ValueAnchor 분포** — 800개 룰은 5개 ValueAnchor 기반으로 분포되어 있다.
 
-**dimension 매핑의 두 층위** — 각 룰은 명시적 `dimension` 필드를 갖는다. **OWL은 *기본(prior) 매핑*을 제공하고, JSON은 *개별 룰의 측정 차원*을 명시하는 구조**다. 본 코드의 `audit_logic`은 두 층위를 모두 활용한다 — JSON 룰의 `dimension` 필드를 *우선*으로 분배하고, 비어 있을 때만 OWL의 `calibratesDimension`으로 폴백한다.
+| ValueAnchor | 룰 수 |
+|---|---|
+| `ContextCompleteness` | 256 |
+| `StanceConsistency` | 192 |
+| `FrameAccountability` | 160 |
+| `PluralPublicReason` | 128 |
+| `EvidenceTransparency` | 64 |
+| `ResponsibilitySeparation` | 0 |
 
-**룰셋의 생성 방식** — 1024개 룰은 16개 RuleSchema(T01~T05, S01~S06, M01~M03·M05·M06)와 15개 target_frame, severity 4단계의 조합으로 *체계적으로 생성*되었다. severity는 4단계(low/medium/high/critical)에 256개씩 균등 분포되어 있어, *현실 빈도 기반 가중치가 아닌 시연용 대표 분포*임을 밝혀둔다. 향후 실제 보도 코퍼스 분석을 통한 빈도 보정이 보강 방향이다.
+6번째인 `ResponsibilitySeparation`은 본 룰셋에서는 사용되지 않으며, **OWL 그래프 추론(Stage 3) 단에서만 작동**한다. 이는 *책임 분리*가 단일 룰 단위가 아니라 *전체 텍스트의 책임 위치 평가*에서만 의미가 있다는 설계 선택이다. 즉 룰 매칭으로는 잡기 어렵고, *과거 옹호 가치 ↔ 현재 프레임* 같은 텍스트 간 관계 추론으로만 잡힌다.
 
-**M04 VictimBlaming의 부재** — OWL에는 정의되어 있으나 1024 룰셋에는 룰이 포함되지 않았다. 피해자 책임 전가 프레임은 *민감 콘텐츠 위험*과 *검출 단서의 미묘함* 때문에 현 단계에서 룰 작성을 보류한 상태이며, M05 ResponsibilityShift가 책임 이전의 일부 케이스를 흡수한다. OWL 어휘로는 *남겨두어* 향후 별도 가이드라인 정립 후 룰 추가가 가능하도록 설계되어 있다.
+**dimension 매핑의 두 층위** — 일부 룰(약 24%)은 OWL의 `calibratesDimension` 기본 매핑과 다른 dimension 필드를 가진다. 예를 들어 `ContextCompleteness`는 OWL에서 `context_omission`을 보정한다고 선언되어 있지만, 일부 룰은 `temporal_shift` 차원에서 측정되도록 정의되어 있다.
 
-### OWL과 JSON의 어휘 비대칭 — sync_frames_with_rules
+이는 *"같은 가치를 다른 차원으로 측정하는 개별 케이스"*로 해석할 수 있다. **OWL은 *기본(prior) 매핑*을 제공하고, JSON은 *개별 룰의 측정 차원*을 명시하는 구조**다. 본 코드의 `audit_logic`은 두 층위를 모두 활용한다 — Stage 3에서는 OWL의 기본 매핑으로 그래프 추론을, Stage 4에서는 JSON 룰의 개별 dimension으로 룰 매칭을 수행한다.
 
-OWL은 *어휘로 풍부*(20개 Frame)하지만, JSON 룰셋은 그 *부분집합*(15개 target_frame)만 다룬다. 본 시스템은 *OWL = 보편 어휘, JSON = 실무 룰*이라는 사상을 따르므로 이 비대칭 자체는 정상이다. OWL-only 프레임(`VictimBlaming`, `CrisisInflation`, `ConflictAmplification`, `FairnessDiscourse`, `NeutralFact`)은 *어휘 자산*으로 보존되며 향후 룰 추가의 거점이 된다.
-
-다만 LLM이 OWL의 모든 Frame을 선택지로 받으면 *JSON에 없는 프레임을 고를 경우 룰이 발화하지 않는* 문제가 생긴다. 본 앱은 기동 시 `sync_frames_with_rules` 함수가 *런타임 LLM 선택지에서만* OWL-only 프레임을 필터링하여 이 간극을 메운다. OWL 파일 자체는 손대지 않는다.
+**룰셋의 생성 방식** — 800개 룰은 17개 RuleSchema(T01~T05, S01~S06, M01~M06)와 12개 target_frame, 16개 context, 4개 severity 단계의 조합으로 *체계적으로 생성*되었다. `severity_band`는 4단계(low/medium/high/critical)에 200개씩 균등 분포되어 있어, *현실 빈도 기반 가중치가 아닌 시연용 대표 분포*임을 밝혀둔다. 향후 실제 보도 코퍼스 분석을 통한 빈도 보정이 보강 방향이다.
 
 ## 페르소나 / 컨텍스트 자료
 
@@ -114,7 +104,7 @@ OWL은 *어휘로 풍부*(20개 Frame)하지만, JSON 룰셋은 그 *부분집�
 │  유동적 판독     │ ←→ │   매개 (그래프 추론) │ ←→ │  부동성 기준층    │
 │                 │    │                     │    │                   │
 │  GPT-4o         │    │  rdflib SPARQL +    │    │  OWL Ontology +   │
-│  (OpenAI API)   │    │  Rule Matching      │    │  1024 JSON Rules  │
+│  (OpenAI API)   │    │  Rule Matching      │    │  800 JSON Rules   │
 └─────────────────┘    └────────────────────┘    └──────────────────┘
         ↓                       ↓                          ↑
   OWL 어휘로 추출       그래프 관계 + 룰 발화          어휘·관계·룰 공급
@@ -124,8 +114,8 @@ OWL은 *어휘로 풍부*(20개 Frame)하지만, JSON 룰셋은 그 *부분집�
 
 1. **추출 (LLM)** — GPT-4o가 두 텍스트(과거/현재)에서 OWL 어휘로 메타데이터 추출
    - `promoted_value`: 6개 ValueAnchor 중 하나
-   - `detected_frame`: 15개 활성 Frame 중 하나 또는 `None` (sync_frames로 정합화)
-   - `topic`: 18개 Topic 중 하나
+   - `detected_frame`: 17개 Frame 중 하나 또는 `None`
+   - `topic`: 16개 Topic 중 하나
    - `stance_polarity`: -1.0 ~ +1.0 정량 극성
    - `is_valid_discourse`: 사실/윤리 위배 여부 (Red Card)
 
@@ -136,31 +126,19 @@ OWL은 *어휘로 풍부*(20개 Frame)하지만, JSON 룰셋은 그 *부분집�
      - *Cross-temporal*: 과거 옹호 가치를 현재 프레임이 위반하는가 (`conflictsWith` 그래프 쿼리)
      - *Self-contradictory*: 텍스트가 옹호한다고 *주장*하는 가치를 그 텍스트의 *프레임*이 스스로 위반
      - *Reinforces*: 가치 이동이 *강화 관계 안*인지(강조점 이동) *밖*인지(구조적 이동) 판별
-   - **Stage 4 — 1024 Rule Matching**: 발화된 frame과 topic에 매치되는 룰을 활성화하고, 각 룰의 `dimension` 필드에 따라 5개 차원에 페널티 분배
+   - **Stage 4 — 800 Rule Matching**: 발화된 frame과 topic에 매치되는 룰을 활성화
 
 3. **리포트 (LLM)** — 발화된 룰을 *증거*로 GPT-4o가 한국어 리치 리포트 생성
    - `verdict`, `summary`, `self_attack`, `steelman`, `evidence_rules`
-   - 각 fired_rule은 `frame_definition_ko`, `schema_description_ko`, `expected_evidence_ko`, `score_hint`(increase_when/decrease_when) 등 *프레임별 분화된 텍스트*를 함께 노출하여 *"왜 이 룰이 발화했는가"*를 추적 가능하게 만든다.
-
-### 점수 계산: weighted_distortion (5차원 정규화)
-
-본 버전부터 최종 점수는 *단순 합산*이 아니라 *dimension별 정규화 후 가중합산*으로 계산된다.
-
-```
-1. 각 차원의 누적 페널티 절댓값을 0~100 스케일로 정규화 (per_dim_cap=60 상한 클리핑)
-2. dimension_weights로 가중합산
-3. 0~100 범위로 클리핑
-
-final_score = max(0, 100 - weighted_distortion + validity_score)
-```
-
-JSON `normalization_note_ko`의 권고를 반영한 설계다 — *기사 길이 또는 매칭 룰 수에 따른 과대평가*를 피하기 위함이다. 한 차원에 페널티가 폭주해도 다른 차원을 지배하지 못하도록 차원별 상한 클리핑이 적용된다.
 
 ### 점수 분리
 
+```
+score = max(0, 100 + validity_score + logic_score)
+```
+
 - `validity_score`: 사실/윤리 위배에 의한 감점 (시계열 무관)
-- `weighted_distortion`: 시계열 입장 변경에 의한 감점 (룰 발화 + 그래프 추론 → 5차원 가중합)
-- `coherence_score` / `distortion_score`: 정합성(높을수록 좋음) 및 왜곡도(높을수록 나쁨) 양방향 출력
+- `logic_score`: 시계열 입장 변경에 의한 감점 (룰 발화 + 그래프 추론 합산)
 
 이 분리는 *"왜 점수가 깎였는가"*가 한눈에 보이도록 한 의도적 설계다.
 
@@ -214,10 +192,8 @@ python axiom_tracker_hybrid.py
 성공 시 콘솔에:
 
 ```
-✅ Ontology loaded: XXX triples, 6 values, 20 frames
-✅ Rules loaded: 1024 rules
-✅ Dimension weights: {'temporal_shift': 0.34, 'frame_effect': 0.24, ...}
-✅ sync_frames: OWL-only 프레임 5개 제거 (LLM 선택지 정합화)
+✅ Ontology loaded: XXX triples, 6 values, 17 frames
+✅ Rules loaded: 800 rules
 * Running on local URL: http://127.0.0.1:7860
 ```
 
@@ -237,7 +213,7 @@ python axiom_tracker_hybrid.py
 ### 출력 패널
 
 - **📋 Final Report** — 최종 판정·요약·자기 비판·변호 논리·근거 룰 ID
-- **🧮 Audit + Fired Rules** — 점수 분해 + weighted_distortion + 5차원 dimension_breakdown + 발화된 룰 전체 목록 (프레임별 분화 텍스트 포함)
+- **🧮 Audit + Fired Rules** — 점수 분해 + 발화된 룰 전체 목록
 - **🔍 Past Extraction** — 과거 텍스트의 OWL 어휘 메타데이터
 - **🔍 Present Extraction** — 현재 텍스트의 OWL 어휘 메타데이터
 
@@ -250,8 +226,7 @@ python axiom_tracker_hybrid.py
 **예상 발화**:
 - Stage 2: Stance polarity 큰 이동 감지
 - Stage 3a: 과거의 `StanceConsistency` 가치를 현재의 `SilentPivot` 또는 유사 프레임이 위반
-- Stage 4: T-계열 시계열 룰 다수 발화, `temporal_shift` 차원에 페널티 집중
-- weighted_distortion: 0.34 × normalized(temporal_shift 페널티)가 지배적 기여
+- Stage 4: T-계열 시계열 룰 다수 발화
 
 **예상 판정**: *"시계열 정합성 위반 — 입장 변경에 대한 명시적 사유 누락"*
 
@@ -268,8 +243,8 @@ context-sync.curator1/
 ├── .env.example
 ├── axiom_tracker_hybrid.py             ← 메인 데모 앱
 ├── ontology/
-│   ├── context_sync_app_centered_ontology_1024
-│   └── news_rules_1024.json
+│   ├── context_sync_app_centered_ontology.owl
+│   └── news_rules_800.json
 ├── docs/                                ← 페르소나/컨텍스트 자료
 │   ├── 01_problem_framing.md
 │   ├── 02_cognition_and_metacognition.md
@@ -282,33 +257,12 @@ context-sync.curator1/
 
 ---
 
-## 변경 이력
-
-### v1.1 (현재) — 5차원 평가 + 룰셋 확장
-
-- **룰셋 확장**: 800 → 1024 (M03 InstitutionalDistrust, M05 ResponsibilityShift, M06 PreemptiveDiscrediting 신규 64개씩 추가)
-- **5차원 평가 도입**: `evidence_quality` 차원 신설, `dimension_weights` 명시 (0.34 / 0.24 / 0.18 / 0.14 / 0.10)
-- **점수 계산 재설계**: `compute_weighted_distortion`이 dimension별 정규화 + 가중합산 수행. 룰 발화 수에 따른 과대평가 방지
-- **JSON dimension 우선 분배**: `audit_logic`이 룰의 `dimension` 필드를 우선 사용, OWL `calibratesDimension`은 폴백
-- **fired_rules 메타 확장**: `frame_definition_ko`, `schema_description_ko`, `expected_evidence_ko`, `score_hint` 등 7개 신규 필드를 리포트에 노출
-- **OWL ↔ JSON 동기화**: `sync_frames_with_rules` 함수가 런타임에 OWL-only 프레임을 LLM 선택지에서 필터링. OWL 파일은 손대지 않음
-
-### v1.0 (이전) — 초기 공개
-
-- OWL 온톨로지 + 800개 외부 룰셋
-- GPT-4o + OWL 그래프 추론 + 룰 매칭의 3축 구조
-- 4단계 검증 체인
-
----
-
 ## 한계와 다음 단계
 
 본 버전은 **시연용 프로토타입**이다. 명시적 한계:
 
 - **`conflictsWith` 관계의 임시성** — 21개 Value↔Frame 충돌 관계는 합리적 가정으로 정의된 것이지, *집단지성으로 검증된* 것이 아니다. 페르소나 자료의 *"잘 정의된 집단지성 위에 자리잡아야 한다"*는 비전 기준에서 보면, 이 관계 자체가 *임시 파라미터*다.
 - **`layer_social_meaning_proxy`의 가중치는 임의 파라미터** — 본래 비전은 *집단지성의 주기적 측정*에 기반한 가중치이지만, 본 프로토타입에서는 임시 대체하고 있다.
-- **`dimension_weights`(0.34/0.24/0.18/0.14/0.10)와 `per_dim_cap=60`은 튜닝 파라미터** — 시연 데이터로 합리적 기본값을 잡았으나, 실측 보도 코퍼스로 검증된 값이 아니다.
-- **M04 VictimBlaming 부재** — OWL 어휘로는 존재하나 룰셋에는 미포함. 민감 도메인 가이드라인 정립 후 추가 예정.
 - **2-텍스트 비교** — 현재는 과거/현재 두 텍스트의 직접 비교만 지원. *동일 매체-동일 사안의 N개 기사 묶음*에 대한 시계열 분석은 다음 단계.
 - **OpenAI API 의존** — 클라우드 LLM 의존. 향후 로컬 sLLM 옵션 추가 검토.
 
@@ -319,8 +273,8 @@ context-sync.curator1/
   - 부동성 기준층의 비전 정의 (잘 정의된 집단지성, 국가 의미 인프라)
 
 - [x] **2단계 — 온톨로지 아키텍처 공개**
-  - OWL 온톨로지 (17 스키마, 6 ValueAnchor, 4 AxiomLayer, 20 Frame 등)
-  - 800개 외부 룰셋 JSON (v1.0)
+  - OWL 온톨로지 (17 스키마, 6 ValueAnchor, 4 AxiomLayer 등)
+  - 800개 외부 룰셋 JSON
   - Value↔Frame conflictsWith 관계 21개, Value↔Value reinforces 관계 8개
 
 - [x] **3단계 — Hybrid 데모 앱 공개**
@@ -328,23 +282,15 @@ context-sync.curator1/
   - 4단계 검증 체인 (Validity / Polarity / Graph / Rule)
   - Pure LLM 비교 버전 (`comparison/`)
 
-- [x] **3.5단계 — 5차원 평가 + 룰셋 확장 (v1.1)**
-  - `evidence_quality` 차원 신설 및 `dimension_weights` 도입
-  - 1024개 룰셋 (M03·M05·M06 확장)
-  - `weighted_distortion` 정규화 점수 계산
-  - `sync_frames_with_rules` 런타임 동기화
-
 - [ ] **4단계 — 기사 묶음 일괄 분석 (Streamlit)** — 작업 진행 중
-  - 5개 차원 지표 + 1024 룰 + 시계열 sentiment 그래프
+  - 4개 차원 지표 + 800 룰 + 시계열 sentiment 그래프
   - Dense/Sparse 이중 RAG
   - 수동 시뮬레이터 (의미값 파라미터 직접 조작)
   - OWL 계층 시각화
 
 - [ ] **5단계 — 집단지성 측정층 보강 방향**
   - `layer_social_meaning_proxy`의 임의 파라미터 → 실측 데이터 점진 대체 방향 제안
-  - `dimension_weights`와 `per_dim_cap`의 실측 보정
   - 단일 매체 시계열 → 교차 매체 비교 확장
-  - M04 VictimBlaming 등 보류 프레임의 룰셋 추가
 
 ---
 
@@ -352,7 +298,7 @@ context-sync.curator1/
 
 본 프로젝트는 [MIT License](./LICENSE)로 배포된다.
 
-OWL 온톨로지 및 1024 룰셋은 본 프로젝트가 처음 공개하는 자산이며, 동일 라이선스 하에 자유롭게 활용 가능하다. 학술·시민사회·언론 영역에서의 활용을 환영한다.
+OWL 온톨로지 및 800 룰셋은 본 프로젝트가 처음 공개하는 자산이며, 동일 라이선스 하에 자유롭게 활용 가능하다. 학술·시민사회·언론 영역에서의 활용을 환영한다.
 
 ## 기여 / 문의
 

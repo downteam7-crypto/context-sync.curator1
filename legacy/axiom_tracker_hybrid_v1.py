@@ -5,7 +5,7 @@ GPT-4의 맥락 판독 능력 위에 OWL 어휘 기준층과 JSON 룰셋을 결�
 
 3축 구조:
     1. 추출 (LLM): GPT-4가 OWL의 ValueAnchor/Frame/Topic 어휘로 텍스트를 구조화
-    2. 검증 (Python + OWL/JSON): rdflib로 OWL의 conflictsWith 관계 검사 + 1024 OWL-expanded 룰셋 매칭
+    2. 검증 (Python + OWL/JSON): rdflib로 OWL의 conflictsWith 관계 검사 + 800 룰셋 매칭
     3. 리포트 (LLM): 발화된 룰을 증거로 GPT-4가 리치 리포트 생성
 
 설계 원칙:
@@ -42,8 +42,8 @@ os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 
 BASE_DIR = Path(__file__).resolve().parent
 ONTOLOGY_DIR = BASE_DIR / "ontology"
-OWL_PATH = ONTOLOGY_DIR / "context_sync_app_centered_ontology_1024.owl"
-RULES_PATH = ONTOLOGY_DIR / "news_rules_1024.json"
+OWL_PATH = ONTOLOGY_DIR / "context_sync_app_centered_ontology.owl"
+RULES_PATH = ONTOLOGY_DIR / "news_rules_800.json"
 
 NS = "http://www.context-sync.com/ontology/news-app#"
 
@@ -161,18 +161,17 @@ class OntologyVocabulary:
 
 
 # ==========================================
-# 2. Rule Loader (JSON 1024)
+# 2. Rule Loader (JSON 800)
 # ==========================================
 
 class RuleSet:
-    """1024개 OWL-expanded 외부 룰셋을 로드하고 매칭 가능한 형태로 보관."""
+    """800개 외부 룰셋을 로드하고 매칭 가능한 형태로 보관."""
 
     def __init__(self, rules_path: Path):
         self.loaded = False
         self.rules: List[Dict[str, Any]] = []
         self.thresholds: Dict[str, Any] = {}
         self.formula: str = ""
-        self.dimension_weights: Dict[str, float] = {}
 
         if not rules_path.exists():
             print(f"⚠️  Rules not found: {rules_path}")
@@ -184,13 +183,6 @@ class RuleSet:
             self.rules = data.get("rules", [])
             self.thresholds = data.get("verdict_thresholds", {})
             self.formula = data.get("aggregation_formula", "")
-            self.dimension_weights = data.get("dimension_weights", {
-                "temporal_shift": 0.34,
-                "frame_effect": 0.24,
-                "context_omission": 0.18,
-                "consensus_deviation": 0.14,
-                "evidence_quality": 0.10,
-            })
             self.loaded = True
             print(f"✅ Rules loaded: {len(self.rules)} rules")
         except Exception as e:
@@ -221,48 +213,6 @@ class RuleSet:
         # 2순위: frame만 매치
         fallback = [r for r in self.rules if r.get("target_frame") == target_frame]
         return fallback[:max_results]
-
-
-def compute_weighted_distortion(
-    dimension_breakdown: Dict[str, float],
-    weights: Dict[str, float],
-    per_dim_cap: float = 60.0,
-) -> float:
-    """차원별 페널티를 JSON dimension_weights에 따라 최종 왜곡도로 환산한다.
-
-    JSON normalization_note_ko의 권고:
-      "최종 점수는 dimension별 0~100 정규화 후 dimension_weights로 가중합산한다.
-       기사 길이 또는 매칭 룰 수에 따른 과대평가를 피하기 위해
-       단순 합산보다 평균/상한 클리핑을 권장한다."
-
-    구현:
-      1. 각 차원의 누적 페널티 절댓값을 0~100 스케일로 정규화 (per_dim_cap 상한 클리핑)
-         - per_dim_cap=60은 "한 차원에 60점 이상 누적되면 100% 왜곡"으로 해석
-         - 룰이 많이 발화되어도 한 차원이 다른 차원을 지배하지 못하게 함
-      2. 정규화된 차원 점수 × 가중치 → 가중 합산
-      3. 최종 0~100 클리핑
-    """
-    if not weights:
-        return 0.0
-
-    weighted_sum = 0.0
-    for dim, weight in weights.items():
-        raw_penalty = abs(float(dimension_breakdown.get(dim, 0.0)))
-        # 정규화: 0 ~ 100 (per_dim_cap이 100% 기준점)
-        normalized = min(100.0, (raw_penalty / per_dim_cap) * 100.0)
-        weighted_sum += normalized * float(weight)
-
-    return min(100.0, round(weighted_sum, 1))
-
-def verdict_from_distortion(distortion: float, thresholds: Dict[str, Any]) -> str:
-    """JSON verdict_thresholds 기준으로 판정 라벨을 반환한다."""
-    aligned_max = float(thresholds.get("aligned_max", 34))
-    caution_max = float(thresholds.get("caution_max", 64))
-    if distortion <= aligned_max:
-        return "기준 부합"
-    if distortion <= caution_max:
-        return "주의 필요"
-    return "기준 이탈"
 
 
 # ==========================================
@@ -434,7 +384,7 @@ def audit_logic(
     vocab: OntologyVocabulary,
     ruleset: RuleSet,
 ) -> Dict[str, Any]:
-    """추출된 두 메타데이터를 OWL 관계 + 1024 OWL-expanded 룰셋으로 비교 검증.
+    """추출된 두 메타데이터를 OWL 관계 + 800 룰셋으로 비교 검증.
 
     점수 분리:
         - validity_score: 사실/윤리 위배 (시계열 무관)
@@ -479,8 +429,6 @@ def audit_logic(
 
     if report["validity_violation"]:
         report["reasons"].append("⛔ AUDIT STOPPED: validity violation supersedes temporal analysis.")
-        report["weighted_distortion"] = 100.0
-        report["anchor_verdict"] = "기준 이탈"
         report["score"] = max(0, 100 + report["validity_score"])
         return report
 
@@ -581,7 +529,7 @@ def audit_logic(
             )
 
     # ─────────────────────────────────────
-    # Stage 4: 1024 Rule Matching (실무 검출)
+    # Stage 4: 800 Rule Matching (실무 검출)
     # ─────────────────────────────────────
     # 현재 텍스트의 frame이 룰에 매치되는지 확인
     matched_rules = ruleset.match_rules(
@@ -606,34 +554,19 @@ def audit_logic(
         severity_penalty = {"critical": -15, "high": -10, "medium": -6, "low": -3}.get(severity, -3)
         report["logic_score"] += severity_penalty
 
-        # JSON 개별 룰의 dimension을 우선 반영한다.
-        # dimension이 없거나 앱 breakdown에 없는 경우에만 OWL value_anchor 매핑으로 폴백한다.
-        rule_dim = rule.get("dimension")
-        if rule_dim in report["dimension_breakdown"]:
-            report["dimension_breakdown"][rule_dim] += severity_penalty
-        else:
-            rule_value = rule.get("value_anchor", "")
-            if rule_value:
-                _distribute_to_dimensions(rule_value, severity_penalty)
+        # 룰의 value_anchor가 보정하는 차원에 페널티 분배
+        rule_value = rule.get("value_anchor", "")
+        if rule_value:
+            _distribute_to_dimensions(rule_value, severity_penalty)
 
         report["fired_rules"].append({
             "rule_id": rule.get("rule_id"),
             "schema_id": rule.get("schema_id"),
-            "schema_type": rule.get("schema_type"),
             "target_frame": rule.get("target_frame"),
-            "context": rule.get("context"),
-            "profile": rule.get("profile"),
             "value_anchor": rule.get("value_anchor"),
-            "dimension": rule.get("dimension"),
             "severity_band": severity,
             "penalty": severity_penalty,
             "instruction": rule.get("llm_instruction_ko", ""),
-            "frame_definition_ko": rule.get("frame_definition_ko", ""),
-            "schema_description_ko": rule.get("schema_description_ko", ""),
-            "expected_evidence_ko": rule.get("expected_evidence_ko", ""),
-            "score_hint": rule.get("score_hint", {}),
-            "positive_cues": rule.get("positive_cues", []),
-            "negative_indicators": rule.get("negative_indicators", []),
         })
 
     if report["fired_rules"]:
@@ -645,16 +578,9 @@ def audit_logic(
         report["dimension_breakdown"][d] = round(report["dimension_breakdown"][d], 1)
 
     # ─────────────────────────────────────
-    # 최종 점수: JSON dimension_weights 기반 weighted_distortion 반영
+    # 최종 점수 (음수 방지)
     # ─────────────────────────────────────
-    weighted_distortion = compute_weighted_distortion(
-        report["dimension_breakdown"],
-        ruleset.dimension_weights,
-    )
-    report["weighted_distortion"] = weighted_distortion
-    report["dimension_weights"] = ruleset.dimension_weights
-    report["anchor_verdict"] = verdict_from_distortion(weighted_distortion, ruleset.thresholds)
-    report["score"] = max(0, round(100 - weighted_distortion + report["validity_score"], 1))
+    report["score"] = max(0, 100 + report["validity_score"] + report["logic_score"])
 
     if not report["reasons"]:
         report["reasons"].append("No significant temporal coherence violations detected.")
@@ -670,7 +596,7 @@ REPORTER_SYSTEM_PROMPT = """You are a discourse audit reporter. Generate a rich 
 
 You will receive:
 - Audit summary with score breakdown
-- List of fired rules from the 1024-rule ontology-backed ruleset
+- List of fired rules from the 800-rule ontology-backed ruleset
 
 Your job:
 - verdict: 한 줄 최종 판정
@@ -694,10 +620,7 @@ def generate_report(client: OpenAI, audit: Dict[str, Any], model: str) -> RichRe
             "validity_score": audit["validity_score"],
             "logic_score": audit["logic_score"],
             "score": audit["score"],
-            "weighted_distortion": audit.get("weighted_distortion"),
-            "anchor_verdict": audit.get("anchor_verdict"),
             "dimension_breakdown": audit.get("dimension_breakdown", {}),
-            "dimension_weights": audit.get("dimension_weights", {}),
             "reasons": audit["reasons"],
             "fired_rules": audit["fired_rules"],
             "past": {
@@ -742,39 +665,6 @@ _VOCAB = OntologyVocabulary(OWL_PATH)
 _RULES = RuleSet(RULES_PATH)
 
 
-def sync_frames_with_rules(vocab: "OntologyVocabulary", ruleset: "RuleSet") -> int:
-    """LLM 선택지에서 OWL-only 프레임을 제거한다.
-
-    OWL은 천천히 변하는 풍부한 어휘를 담고, JSON 룰셋은 실무 검출 규칙을 담는다.
-    OWL이 더 많은 프레임을 가질 수 있으나, LLM이 JSON 룰셋에 없는 프레임을
-    고르면 fired_rules가 비게 된다. 이를 막기 위해 *런타임에만* 선택지를 필터링.
-    OWL 파일 자체는 손대지 않는다.
-
-    Returns:
-        제거된 프레임 수
-    """
-    if not vocab.loaded or not ruleset.loaded:
-        return 0
-
-    valid_frames = {r.get("target_frame") for r in ruleset.rules if r.get("target_frame")}
-    # NeutralFact는 기준선 프레임으로 보존 (룰셋에 없어도 LLM이 'None' 대안으로 선택 가능)
-    valid_frames.add("NeutralFact")
-
-    before = len(vocab.frames)
-    vocab.frames = [f for f in vocab.frames if f in valid_frames]
-    vocab.frame_descriptions = {
-        k: v for k, v in vocab.frame_descriptions.items() if k in valid_frames
-    }
-    removed = before - len(vocab.frames)
-    if removed > 0:
-        print(f"✅ sync_frames: OWL-only 프레임 {removed}개 제거 (LLM 선택지 정합화)")
-    return removed
-
-
-# OWL 풍부한 어휘 vs JSON 룰셋의 부분집합 — 런타임 동기화
-sync_frames_with_rules(_VOCAB, _RULES)
-
-
 def run_pipeline(
     past_text: str,
     present_text: str,
@@ -807,7 +697,7 @@ def run_pipeline(
     except Exception as e:
         return {"error": f"추출 단계 실패: {e}"}, {}, {}, {}
 
-    # Step 2: 검증 (OWL 관계 + 1024 룰)
+    # Step 2: 검증 (OWL 관계 + 800 룰)
     audit_result = audit_logic(past_data, present_data, _VOCAB, _RULES)
 
     # Step 3: 리포트
@@ -875,8 +765,6 @@ def build_ontology_status() -> str:
 
     if _RULES.loaded:
         lines.append(f"- ✅ Rules: {len(_RULES.rules)}개")
-        if getattr(_RULES, "dimension_weights", None):
-            lines.append(f"- ✅ Dimension weights: {_RULES.dimension_weights}")
     else:
         lines.append(f"- ❌ Rules not loaded ({RULES_PATH})")
 
@@ -884,10 +772,10 @@ def build_ontology_status() -> str:
 
 
 with gr.Blocks(title="Axiom Tracker — Hybrid Edition") as demo:
-    gr.Markdown("## 🛡️ Axiom Tracker — Hybrid Edition (LLM + OWL + 1024 Rules)")
+    gr.Markdown("## 🛡️ Axiom Tracker — Hybrid Edition (LLM + OWL + 800 Rules)")
     gr.Markdown(
-        "GPT-4 + OWL 어휘 기준층 + 1024 OWL-expanded 룰셋 결합 시계열 논조 판독기.\n\n"
-        "**3축 구조**: GPT-4가 OWL 어휘로 추출 → rdflib로 OWL 관계 검증 + 1024 룰 매칭 → GPT-4가 룰 근거 리포트 생성"
+        "GPT-4 + OWL 어휘 기준층 + 800 룰셋 결합 시계열 논조 판독기.\n\n"
+        "**3축 구조**: GPT-4가 OWL 어휘로 추출 → rdflib로 OWL 관계 검증 + 800 룰 매칭 → GPT-4가 룰 근거 리포트 생성"
     )
     gr.Markdown(build_ontology_status())
 
@@ -935,7 +823,7 @@ with gr.Blocks(title="Axiom Tracker — Hybrid Edition") as demo:
         "---\n"
         "**점수 분리**\n"
         "- `validity_score`: 사실/윤리 위배 (Red Card, 시계열 무관)\n"
-        "- `logic_score`: 시계열 입장 변경 (OWL 관계 + 1024 룰 발화)\n"
+        "- `logic_score`: 시계열 입장 변경 (OWL 관계 + 800 룰 발화)\n"
         "- `score = max(0, 100 + validity + logic)`\n\n"
         "**차원별 분해 (`dimension_breakdown`)**: 각 ValueAnchor 위반 페널티가 OWL의 "
         "`calibratesDimension` 관계로 5개 EvaluationDimension에 분배된다.\n"
