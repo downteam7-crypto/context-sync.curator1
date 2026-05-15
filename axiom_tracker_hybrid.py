@@ -1,5 +1,5 @@
 """
-Axiom Tracker — Hybrid Edition (OpenAI GPT-4 + OWL Vocabulary + JSON Rules)
+Axiom Tracker — Hybrid Edition v2.1.1 (OpenAI GPT-4 + OWL Vocabulary + JSON Rules)
 
 GPT-4의 맥락 판독 능력 위에 OWL 어휘 기준층과 JSON 룰셋을 결합한 시계열 논조 판독 앱.
 
@@ -185,10 +185,10 @@ class RuleSet:
             self.thresholds = data.get("verdict_thresholds", {})
             self.formula = data.get("aggregation_formula", "")
             self.dimension_weights = data.get("dimension_weights", {
-                "temporal_shift": 0.34,
-                "frame_effect": 0.24,
-                "context_omission": 0.18,
-                "consensus_deviation": 0.14,
+                "temporal_shift": 0.40,
+                "frame_effect": 0.22,
+                "context_omission": 0.15,
+                "consensus_deviation": 0.13,
                 "evidence_quality": 0.10,
             })
             self.loaded = True
@@ -226,7 +226,7 @@ class RuleSet:
 def compute_weighted_distortion(
     dimension_breakdown: Dict[str, float],
     weights: Dict[str, float],
-    per_dim_cap: float = 60.0,
+    per_dim_cap: float = 45.0,
 ) -> float:
     """차원별 페널티를 JSON dimension_weights에 따라 최종 왜곡도로 환산한다.
 
@@ -235,12 +235,18 @@ def compute_weighted_distortion(
        기사 길이 또는 매칭 룰 수에 따른 과대평가를 피하기 위해
        단순 합산보다 평균/상한 클리핑을 권장한다."
 
-    구현:
-      1. 각 차원의 누적 페널티 절댓값을 0~100 스케일로 정규화 (per_dim_cap 상한 클리핑)
-         - per_dim_cap=60은 "한 차원에 60점 이상 누적되면 100% 왜곡"으로 해석
+    구현 (v2.1 기준):
+      1. 각 차원의 누적 페널티 절댓값을 0~100 스케일로 정규화 (per_dim_cap=45 상한 클리핑)
+         - per_dim_cap=45는 "한 차원에 45점 이상 누적되면 100% 왜곡"으로 해석
+         - Major polarity shift (-30) 단독 시 정합 영역의 가장 낮은 지대(score 70대 초중반)에 안착
          - 룰이 많이 발화되어도 한 차원이 다른 차원을 지배하지 못하게 함
       2. 정규화된 차원 점수 × 가중치 → 가중 합산
+         (v2.1 가중치: temporal_shift 0.40, frame_effect 0.22, context_omission 0.15,
+          consensus_deviation 0.13, evidence_quality 0.10)
       3. 최종 0~100 클리핑
+
+    per_dim_cap은 튜닝 파라미터다. README의 *임시 파라미터 명시* 사상에 따라
+    실측 보도 코퍼스로 검증 후 보정될 예정.
     """
     if not weights:
         return 0.0
@@ -437,9 +443,11 @@ def audit_logic(
     """추출된 두 메타데이터를 OWL 관계 + 1024 OWL-expanded 룰셋으로 비교 검증.
 
     점수 분리:
-        - validity_score: 사실/윤리 위배 (시계열 무관)
-        - logic_score: 시계열 입장 변경 (룰 발화 기반)
-        - total = max(0, 100 + validity + logic)
+        - validity_score: 사실/윤리 위배 (Red Card, 시계열 무관)
+        - logic_score: 시계열 입장 변경, OWL 충돌, JSON 룰 발화의 원점수
+        - dimension_breakdown: logic_score 페널티가 5개 EvaluationDimension에 누적된 값
+        - weighted_distortion: dimension_breakdown을 per_dim_cap=45와 dimension_weights로 정규화한 최종 왜곡도
+        - total = max(0, 100 - weighted_distortion + validity_score)
     """
     report = {
         "validity_violation": False,
@@ -486,23 +494,29 @@ def audit_logic(
 
     # ─────────────────────────────────────
     # Stage 2: Stance Polarity Shift (정량)
+    # 입장 극성 이동은 본질적으로 temporal_shift 차원의 왜곡이므로,
+    # logic_score뿐 아니라 dimension_breakdown["temporal_shift"]에도 페널티를 직접 누적한다.
+    # 이렇게 해야 weighted_distortion 가중합에 실제로 반영된다.
     # ─────────────────────────────────────
     polarity_shift = abs(past.stance_polarity - present.stance_polarity)
     if polarity_shift >= 1.0:
         report["logic_conflict"] = True
         report["logic_score"] -= 30
+        report["dimension_breakdown"]["temporal_shift"] -= 30
         report["reasons"].append(
-            f"Major stance reversal: {past.stance_polarity:+.2f} → {present.stance_polarity:+.2f} (Δ={polarity_shift:.2f})"
+            f"Major stance reversal: {past.stance_polarity:+.2f} → {present.stance_polarity:+.2f} (Δ={polarity_shift:.2f}) → temporal_shift"
         )
     elif polarity_shift >= 0.5:
         report["logic_score"] -= 15
+        report["dimension_breakdown"]["temporal_shift"] -= 15
         report["reasons"].append(
-            f"Significant stance shift: {past.stance_polarity:+.2f} → {present.stance_polarity:+.2f} (Δ={polarity_shift:.2f})"
+            f"Significant stance shift: {past.stance_polarity:+.2f} → {present.stance_polarity:+.2f} (Δ={polarity_shift:.2f}) → temporal_shift"
         )
     elif polarity_shift >= 0.25:
         report["logic_score"] -= 5
+        report["dimension_breakdown"]["temporal_shift"] -= 5
         report["reasons"].append(
-            f"Moderate stance shift: Δ={polarity_shift:.2f}"
+            f"Moderate stance shift: Δ={polarity_shift:.2f} → temporal_shift"
         )
 
     # ─────────────────────────────────────
@@ -518,7 +532,9 @@ def audit_logic(
     # 한 Value가 여러 차원을 calibrate하면 페널티를 균등 분배
     def _distribute_to_dimensions(value: str, penalty: int) -> str:
         """ValueAnchor의 위반 페널티를 OWL calibratesDimension 그래프로
-        추론한 차원들에 분배 기록한다. 어느 차원에도 매핑되지 않으면 무시.
+        추론한 차원들에 분배 기록한다. calibrated dim이 없으면 frame_effect로 폴백한다
+        (그래프 추론의 default 차원). 이렇게 해야 logic_score 페널티가 weighted_distortion에
+        반드시 반영된다.
 
         반환: 분배된 차원들의 한국어 요약 (reasons에 추가하기 위해).
         """
@@ -526,6 +542,10 @@ def audit_logic(
             return ""
         dims = get_calibrated_dimensions(vocab, value)
         if not dims:
+            # 폴백: 그래프 추론 페널티가 어디에도 매핑되지 않으면 frame_effect로
+            if "frame_effect" in report["dimension_breakdown"]:
+                report["dimension_breakdown"]["frame_effect"] += penalty
+                return f" → fallback dimension: frame_effect"
             return ""
         per_dim_penalty = penalty / len(dims)  # 음수 페널티
         for d in dims:
@@ -646,6 +666,13 @@ def audit_logic(
 
     # ─────────────────────────────────────
     # 최종 점수: JSON dimension_weights 기반 weighted_distortion 반영
+    #
+    # 설계 원칙:
+    # - 정상 경로: logic_score 페널티가 발생할 때마다 dimension_breakdown에도 같이 누적됨
+    #   → weighted_distortion이 그 누적값을 5차원 가중합으로 환산 → 최종 점수에 반영
+    # - 안전망: 혹시 어떤 페널티가 dimension에 못 들어간 채 logic_score에만 남으면
+    #   (예: 신규 페널티 추가 시 dimension 분배를 깜빡한 경우) 점수를 임의 보정하지 않고
+    #   warning만 남긴다. 점수 차원 왜곡을 막기 위해 frame_effect 강제 흡수는 사용하지 않는다.
     # ─────────────────────────────────────
     weighted_distortion = compute_weighted_distortion(
         report["dimension_breakdown"],
@@ -654,6 +681,19 @@ def audit_logic(
     report["weighted_distortion"] = weighted_distortion
     report["dimension_weights"] = ruleset.dimension_weights
     report["anchor_verdict"] = verdict_from_distortion(weighted_distortion, ruleset.thresholds)
+
+    # 안전망: weighted_distortion이 logic_score 감점을 충분히 반영하지 못한 듯하면 경고만 남긴다.
+    # 점수를 임의 보정하지 않는 이유: 미반영분이 temporal/context/evidence 중 어느 축인지
+    # 확정할 수 없는데 frame_effect로 강제 흡수하면 리포트 해석이 왜곡될 수 있다.
+    dim_total_penalty = sum(abs(v) for v in report["dimension_breakdown"].values())
+    logic_abs = abs(report["logic_score"])
+    if logic_abs > dim_total_penalty + 0.5:  # 부동소수점 오차 허용
+        unreflected = logic_abs - dim_total_penalty
+        report["reasons"].append(
+            f"[warning] logic_score 미반영 가능성: {unreflected:.1f}점. "
+            "신규 페널티가 dimension_breakdown에 연결되었는지 확인 필요."
+        )
+
     report["score"] = max(0, round(100 - weighted_distortion + report["validity_score"], 1))
 
     if not report["reasons"]:
@@ -934,11 +974,13 @@ with gr.Blocks(title="Axiom Tracker — Hybrid Edition") as demo:
     gr.Markdown(
         "---\n"
         "**점수 분리**\n"
-        "- `validity_score`: 사실/윤리 위배 (Red Card, 시계열 무관)\n"
-        "- `logic_score`: 시계열 입장 변경 (OWL 관계 + 1024 룰 발화)\n"
-        "- `score = max(0, 100 + validity + logic)`\n\n"
+        "- `validity_score`: 사실/윤리 위배. Red Card 사유이며 시계열 평가와 분리된다.\n"
+        "- `logic_score`: 시계열 입장 변경, OWL 충돌, JSON 룰 발화의 원점수다.\n"
+        "- `dimension_breakdown`: logic_score 페널티가 5개 평가 차원에 누적된 값이다.\n"
+        "- `weighted_distortion`: dimension_breakdown을 `per_dim_cap=45`와 `dimension_weights`로 정규화한 최종 왜곡도다.\n"
+        "- `score = max(0, 100 - weighted_distortion + validity_score)`\n\n"
         "**차원별 분해 (`dimension_breakdown`)**: 각 ValueAnchor 위반 페널티가 OWL의 "
-        "`calibratesDimension` 관계로 5개 EvaluationDimension에 분배된다.\n"
+        "`calibratesDimension` 관계 또는 JSON rule dimension에 따라 5개 EvaluationDimension에 분배된다.\n"
         "- `temporal_shift` ← StanceConsistency\n"
         "- `frame_effect` ← FrameAccountability, ResponsibilitySeparation\n"
         "- `context_omission` ← ContextCompleteness\n"
