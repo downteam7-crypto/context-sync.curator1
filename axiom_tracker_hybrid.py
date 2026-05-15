@@ -1,5 +1,5 @@
 """
-Axiom Tracker — Hybrid Edition v2.1.1 (OpenAI GPT-4 + OWL Vocabulary + JSON Rules)
+Axiom Tracker — Hybrid Edition v2.1.2-continuous-scoring (OpenAI GPT-4 + OWL Vocabulary + JSON Rules)
 
 GPT-4의 맥락 판독 능력 위에 OWL 어휘 기준층과 JSON 룰셋을 결합한 시계열 논조 판독 앱.
 
@@ -272,6 +272,130 @@ def verdict_from_distortion(distortion: float, thresholds: Dict[str, Any]) -> st
 
 
 # ==========================================
+# 2-1. Continuous Scoring Helpers
+# ==========================================
+
+def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
+    """점수 계산용 범위 제한 헬퍼."""
+    return max(lower, min(upper, float(value)))
+
+
+def compute_temporal_shift_penalty(
+    polarity_shift: float,
+    min_shift: float = 0.25,
+    full_shift: float = 1.25,
+    min_penalty: float = 5.0,
+    max_penalty: float = 30.0,
+) -> float:
+    """입장 극성 변화량을 temporal_shift 연속 감점으로 변환한다.
+
+    기존 v2.1.1의 -5/-15/-30 계단형 대신, 0.25부터 1.25까지
+    선형으로 -5 → -30에 도달하게 한다. 1.25 이상은 -30으로 cap한다.
+    예: Δ=0.25 → -5.0, Δ=0.50 → -11.2, Δ=0.75 → -17.5,
+        Δ=1.00 → -23.8, Δ>=1.25 → -30.0
+    """
+    delta = float(polarity_shift)
+    if delta < min_shift:
+        return 0.0
+
+    span = max(full_shift - min_shift, 1e-9)
+    ratio = _clamp((min(delta, full_shift) - min_shift) / span)
+    penalty = min_penalty + ratio * (max_penalty - min_penalty)
+    return -round(min(max_penalty, penalty), 1)
+
+
+def describe_temporal_shift(polarity_shift: float) -> str:
+    """리포트 reason에 사용할 시계열 변화 강도 라벨."""
+    if polarity_shift >= 1.25:
+        return "Full-scale stance reversal"
+    if polarity_shift >= 1.0:
+        return "Major stance reversal"
+    if polarity_shift >= 0.5:
+        return "Significant stance shift"
+    return "Moderate stance shift"
+
+
+def compute_graph_penalty(
+    base_abs: float,
+    polarity_shift: Optional[float] = None,
+    floor_factor: float = 1.0,
+) -> float:
+    """OWL 그래프 추론 페널티.
+
+    OWL 자체는 관계/개념층이므로 점수값을 OWL에 넣지 않는다. 다만
+    cross-temporal 충돌처럼 입장 변화량이 함께 해석되는 경우에는 polarity_shift로
+    신호 강도를 연속 보정한다. self-contradiction처럼 별도 강도 변수가 없는 경우에는
+    기존 base_abs를 그대로 쓴다.
+    """
+    if polarity_shift is None:
+        return -round(float(base_abs), 1)
+
+    shift_factor = _clamp(float(polarity_shift) / 1.25)
+    factor = max(_clamp(floor_factor), shift_factor)
+    return -round(float(base_abs) * factor, 1)
+
+
+def compute_rule_penalty(
+    rule: Dict[str, Any],
+    polarity_shift: float,
+    has_logic_conflict: bool,
+) -> Tuple[float, Dict[str, float]]:
+    """JSON 룰의 연속 가중치를 실제 감점에 반영한다.
+
+    기존 방식은 severity_band만으로 -3/-6/-10/-15를 부여했다. v2.1.2에서는
+    severity_base에 risk_weight, distortion_weight, consensus_weight, temporal activation을
+    함께 반영한다.
+
+    - severity_base: 룰 등급별 기본 최대 감점
+    - rule_strength: 룰셋이 제공하는 연속 위험도. consensus_weight가 낮을수록 위험 증가
+    - activation: polarity_shift 기반 발화 강도. OWL 충돌이 이미 있으면 최소 발화 강도 보장
+    """
+    severity = str(rule.get("severity_band", "low"))
+    severity_base = {
+        "critical": 18.0,
+        "high": 12.0,
+        "medium": 7.0,
+        "low": 4.0,
+    }.get(severity, 4.0)
+
+    risk_w = _clamp(float(rule.get("risk_weight", 0.5)))
+    distortion_w = _clamp(float(rule.get("distortion_weight", 0.5)))
+    consensus_w = _clamp(float(rule.get("consensus_weight", 0.5)))
+
+    rule_strength = _clamp(
+        0.50 * risk_w
+        + 0.30 * distortion_w
+        + 0.20 * (1.0 - consensus_w)
+    )
+
+    shift_activation = _clamp(float(polarity_shift) / 1.25)
+    activation = max(shift_activation, 0.35 if has_logic_conflict else 0.0)
+    intensity = _clamp(activation * risk_w * distortion_w)
+
+    if intensity < 0.05 and not has_logic_conflict:
+        return 0.0, {
+            "severity_base": severity_base,
+            "risk_weight": risk_w,
+            "distortion_weight": distortion_w,
+            "consensus_weight": consensus_w,
+            "rule_strength": round(rule_strength, 3),
+            "activation": round(activation, 3),
+            "intensity": round(intensity, 3),
+        }
+
+    penalty = -round(severity_base * rule_strength * max(activation, 0.35 if has_logic_conflict else 0.0), 1)
+    return penalty, {
+        "severity_base": severity_base,
+        "risk_weight": risk_w,
+        "distortion_weight": distortion_w,
+        "consensus_weight": consensus_w,
+        "rule_strength": round(rule_strength, 3),
+        "activation": round(activation, 3),
+        "intensity": round(intensity, 3),
+    }
+
+
+# ==========================================
 # 3. Pydantic Schemas
 # ==========================================
 
@@ -493,30 +617,23 @@ def audit_logic(
         return report
 
     # ─────────────────────────────────────
-    # Stage 2: Stance Polarity Shift (정량)
+    # Stage 2: Stance Polarity Shift (정량, 연속형)
     # 입장 극성 이동은 본질적으로 temporal_shift 차원의 왜곡이므로,
     # logic_score뿐 아니라 dimension_breakdown["temporal_shift"]에도 페널티를 직접 누적한다.
-    # 이렇게 해야 weighted_distortion 가중합에 실제로 반영된다.
+    # v2.1.2부터는 -5/-15/-30 계단형이 아니라 Δ=0.25~1.25 구간을
+    # -5~-30으로 선형 보간해 중간 변화량을 보존한다.
     # ─────────────────────────────────────
     polarity_shift = abs(past.stance_polarity - present.stance_polarity)
-    if polarity_shift >= 1.0:
-        report["logic_conflict"] = True
-        report["logic_score"] -= 30
-        report["dimension_breakdown"]["temporal_shift"] -= 30
+    temporal_penalty = compute_temporal_shift_penalty(polarity_shift)
+    if temporal_penalty != 0:
+        if polarity_shift >= 1.0:
+            report["logic_conflict"] = True
+        report["logic_score"] += temporal_penalty
+        report["dimension_breakdown"]["temporal_shift"] += temporal_penalty
+        label = describe_temporal_shift(polarity_shift)
         report["reasons"].append(
-            f"Major stance reversal: {past.stance_polarity:+.2f} → {present.stance_polarity:+.2f} (Δ={polarity_shift:.2f}) → temporal_shift"
-        )
-    elif polarity_shift >= 0.5:
-        report["logic_score"] -= 15
-        report["dimension_breakdown"]["temporal_shift"] -= 15
-        report["reasons"].append(
-            f"Significant stance shift: {past.stance_polarity:+.2f} → {present.stance_polarity:+.2f} (Δ={polarity_shift:.2f}) → temporal_shift"
-        )
-    elif polarity_shift >= 0.25:
-        report["logic_score"] -= 5
-        report["dimension_breakdown"]["temporal_shift"] -= 5
-        report["reasons"].append(
-            f"Moderate stance shift: Δ={polarity_shift:.2f} → temporal_shift"
+            f"{label}: {past.stance_polarity:+.2f} → {present.stance_polarity:+.2f} "
+            f"(Δ={polarity_shift:.2f}, penalty={temporal_penalty:.1f}) → temporal_shift"
         )
 
     # ─────────────────────────────────────
@@ -530,7 +647,7 @@ def audit_logic(
 
     # 헬퍼: penalty를 calibrate된 차원에 분배
     # 한 Value가 여러 차원을 calibrate하면 페널티를 균등 분배
-    def _distribute_to_dimensions(value: str, penalty: int) -> str:
+    def _distribute_to_dimensions(value: str, penalty: float) -> str:
         """ValueAnchor의 위반 페널티를 OWL calibratesDimension 그래프로
         추론한 차원들에 분배 기록한다. calibrated dim이 없으면 frame_effect로 폴백한다
         (그래프 추론의 default 차원). 이렇게 해야 logic_score 페널티가 weighted_distortion에
@@ -558,46 +675,49 @@ def audit_logic(
     if past.promoted_value and present.detected_frame and present.detected_frame != "None":
         if check_value_frame_conflict(vocab, past.promoted_value, present.detected_frame):
             report["logic_conflict"] = True
-            penalty = -25
+            penalty = compute_graph_penalty(25.0, polarity_shift, floor_factor=0.65)
             report["logic_score"] += penalty
             dim_note = _distribute_to_dimensions(past.promoted_value, penalty)
             report["reasons"].append(
                 f"OWL graph conflict (cross-temporal): PAST value '{past.promoted_value}' "
-                f"↔ PRESENT frame '{present.detected_frame}'{dim_note}"
+                f"↔ PRESENT frame '{present.detected_frame}' "
+                f"(penalty={penalty:.1f}){dim_note}"
             )
 
     # 보조: 현재 옹호 가치를 현재 프레임이 위반 (자기 모순)
     if present.promoted_value and present.detected_frame and present.detected_frame != "None":
         if check_value_frame_conflict(vocab, present.promoted_value, present.detected_frame):
-            penalty = -15
+            penalty = compute_graph_penalty(15.0)
             report["logic_score"] += penalty
             dim_note = _distribute_to_dimensions(present.promoted_value, penalty)
             report["reasons"].append(
                 f"OWL graph conflict (self-contradictory): PRESENT value '{present.promoted_value}' "
-                f"↔ PRESENT frame '{present.detected_frame}' (text claims a value its frame undermines){dim_note}"
+                f"↔ PRESENT frame '{present.detected_frame}' "
+                f"(text claims a value its frame undermines, penalty={penalty:.1f}){dim_note}"
             )
 
     # 3b. 가치 이동의 성격 판별
     if past.promoted_value != present.promoted_value:
         if check_value_reinforces(vocab, past.promoted_value, present.promoted_value):
             # 강화 관계 → 강조점 이동, 가벼운 페널티
-            penalty = -3
+            penalty = compute_graph_penalty(3.0, polarity_shift, floor_factor=0.50)
             report["logic_score"] += penalty
             # 강조점 이동은 두 가치 모두에 영향 → 두 가치의 calibrated 차원에 분배
-            _distribute_to_dimensions(past.promoted_value, penalty // 2)
-            _distribute_to_dimensions(present.promoted_value, penalty - penalty // 2)
+            _distribute_to_dimensions(past.promoted_value, penalty / 2)
+            _distribute_to_dimensions(present.promoted_value, penalty - penalty / 2)
             report["reasons"].append(
                 f"Value emphasis shift (within reinforcement relation): "
-                f"{past.promoted_value} ↔ {present.promoted_value}"
+                f"{past.promoted_value} ↔ {present.promoted_value} (penalty={penalty:.1f})"
             )
         else:
             # 강화 관계도 아님 → 더 큰 이동, 검토 필요
-            penalty = -12
+            penalty = compute_graph_penalty(12.0, polarity_shift, floor_factor=0.50)
             report["logic_score"] += penalty
             dim_note = _distribute_to_dimensions(past.promoted_value, penalty)
             report["reasons"].append(
                 f"Value shift (no OWL reinforces relation): "
-                f"{past.promoted_value} → {present.promoted_value}{dim_note}"
+                f"{past.promoted_value} → {present.promoted_value} "
+                f"(penalty={penalty:.1f}){dim_note}"
             )
 
     # ─────────────────────────────────────
@@ -611,19 +731,17 @@ def audit_logic(
     )
 
     for rule in matched_rules:
-        # 룰 발화 조건: stance shift가 있거나 frame이 검출된 경우
-        # severity_band에 따라 점수 차감
+        # 룰 발화 조건: stance shift가 있거나 OWL graph conflict가 이미 확인된 경우.
+        # v2.1.2부터 severity_band 고정값이 아니라 JSON의 연속 가중치를 실제 감점에 반영한다.
         severity = rule.get("severity_band", "low")
-        risk_w = float(rule.get("risk_weight", 0.5))
-        distortion_w = float(rule.get("distortion_weight", 0.5))
-
-        # 규칙 발화 강도: stance shift × risk × distortion
-        # (stance shift가 작으면 룰이 약하게 발화)
-        intensity = polarity_shift * risk_w * distortion_w
-        if intensity < 0.05 and not report["logic_conflict"]:
+        severity_penalty, scoring = compute_rule_penalty(
+            rule=rule,
+            polarity_shift=polarity_shift,
+            has_logic_conflict=report["logic_conflict"],
+        )
+        if severity_penalty == 0:
             continue  # 약한 발화는 무시
 
-        severity_penalty = {"critical": -15, "high": -10, "medium": -6, "low": -3}.get(severity, -3)
         report["logic_score"] += severity_penalty
 
         # JSON 개별 룰의 dimension을 우선 반영한다.
@@ -647,6 +765,13 @@ def audit_logic(
             "dimension": rule.get("dimension"),
             "severity_band": severity,
             "penalty": severity_penalty,
+            "severity_base": scoring["severity_base"],
+            "risk_weight": scoring["risk_weight"],
+            "distortion_weight": scoring["distortion_weight"],
+            "consensus_weight": scoring["consensus_weight"],
+            "rule_strength": scoring["rule_strength"],
+            "activation": scoring["activation"],
+            "intensity": scoring["intensity"],
             "instruction": rule.get("llm_instruction_ko", ""),
             "frame_definition_ko": rule.get("frame_definition_ko", ""),
             "schema_description_ko": rule.get("schema_description_ko", ""),
