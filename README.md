@@ -19,7 +19,7 @@ LLM의 맥락 판단 능력 위에 온톨로지의 고정된 기준층을 결합
 본 프로젝트의 부동성 기준층은 **스키마-룰셋 분리 구조**로 설계되어 있다.
 
 - **OWL 온톨로지** (`ontology/context_sync_app_centered_ontology.owl`): 17개의 추상 스키마, 6개의 ValueAnchor, 4개의 AxiomLayer, 5개의 EvaluationDimension, 20개의 Frame, 18개의 Topic 등 **느리게 변하는 보편 어휘**와, 그 어휘 사이의 **그래프 관계**(21개 conflictsWith, 8개 reinforces, 7개 calibratesDimension)를 정의한다.
-- **외부 룰셋** (`ontology/news_rules_1024.json`): 위 스키마에 속하는 **1024개의 실무 검출 규칙**을 별도 파일로 관리한다. (v2.1.1-dimension-aligned, 시계열 중심 가중치 보정 및 OWL↔JSON dimension 정합성 반영)
+- **외부 룰셋** (`ontology/news_rules_1024.json`): 위 스키마에 속하는 **1024개의 실무 검출 규칙**을 별도 파일로 관리한다. (v2.1.2-dimension-aligned-continuous-scoring, 시계열 중심 가중치 보정, OWL↔JSON dimension 정합화, 연속 감점화 반영)
 
 이 분리는 페르소나 자료에서 제기한 *"공리를 80개가 아니라 800개, 8000개로 늘리면 정교해질까"*라는 질문에 대한 공학적 응답이다. 어휘를 무겁게 늘리는 대신, 추상 어휘는 OWL에 안정적으로 두고 실무 규칙은 외부 데이터셋으로 분리해 운용한다.
 
@@ -61,7 +61,7 @@ LLM의 맥락 판단 능력 위에 온톨로지의 고정된 기준층을 결합
 
 ### 5차원 평가와 dimension_weights
 
-본 룰셋 v2.1.1 기준으로 평가는 5개 EvaluationDimension의 가중합으로 정의되며, **시계열 정합성을 본 시스템의 정체성으로 명시하는 가중치 분포**가 적용된다. JSON 최상위에 명시된 `dimension_weights`가 Python의 점수 계산에 직접 반영된다.
+본 룰셋 v2.1.2 기준으로 평가는 5개 EvaluationDimension의 가중합으로 정의되며, **시계열 정합성을 본 시스템의 정체성으로 명시하는 가중치 분포**가 적용된다. JSON 최상위에 명시된 `dimension_weights`가 Python의 점수 계산에 직접 반영된다.
 
 ```
 final_distortion =
@@ -252,12 +252,22 @@ python axiom_tracker_hybrid.py
 - Present: *"A정책은 사회 전체의 안전을 위한 불가피한 조치다. 일부 권리 제한은 감수할 만하다."*
 
 **예상 발화**:
-- Stage 2: Stance polarity 큰 이동 감지 → `temporal_shift` 차원에 직접 -30 누적
+- Stage 2: Stance polarity 이동량 Δ를 *연속 감점*으로 환산해 `temporal_shift` 차원에 누적 (Δ=0.25부터 -5점, Δ≥1.25에서 -30점 cap)
 - Stage 3a: 과거의 `StanceConsistency` 가치를 현재의 `SilentPivot` 또는 유사 프레임이 위반
-- Stage 4: T-계열 시계열 룰 다수 발화, `temporal_shift` 차원에 페널티 집중
+- Stage 4: T-계열 시계열 룰 발화. 각 룰의 `risk_weight × distortion_weight × consensus_weight × activation`이 함께 작동해 페널티가 결정됨 (severity_band 고정 감점이 아님)
 - weighted_distortion: 0.40 × normalized(temporal_shift 페널티)가 지배적 기여
 
-**예상 판정 (시계열 단독 발화 시)**: *score 70대 초중반 — 정합 영역의 가장 낮은 지대. "분명한 시계열 경고지만 다른 차원이 멀쩡하면 종합 붕괴는 아님"*
+**예상 판정 — polarity shift 단독 케이스의 연속 점수 분포**:
+
+| Δ (입장 이동량) | temporal 페널티 | 최종 score | 영역 |
+|---|---|---|---|
+| 0.25 (Moderate) | -5.0 | 95.6 | 정합 |
+| 0.50 (Significant) | -11.2 | 90.0 | 정합 |
+| 0.75 | -17.5 | 84.4 | 정합 |
+| 1.00 (Major) | -23.8 | 78.8 | 정합 끝 |
+| 1.25+ (Full reversal) | -30.0 | 73.3 | 정합 끝 / 주의 직전 |
+
+기존 v1.2 계단형의 *임계값 직후 점프*(Δ=0.99→1.00에서 -15→-30)가 사라지고, *입장 이동량에 비례한 부드러운 감점*이 적용된다.
 
 **예상 판정 (복합 발화 시)**: *score 60 이하 — caution 영역 진입. 추가 차원이 함께 발화되면 deviated 영역까지 도달*
 
@@ -292,7 +302,23 @@ context-sync.curator1/
 
 ## 변경 이력
 
-### v1.2.1 (현재) — dimension 정합성 정리 + 안전망 경고화
+### v1.2.2 (현재) — 연속 감점 도입
+
+v1.2.1까지의 *계단형 임계값*이 가진 부조리(Δ=0.99→1.00에서 페널티가 -15→-30으로 점프하는 단절)를 해소한 버전. 핵심은 *Stage 2 polarity shift와 JSON 룰 발화 모두를 연속 함수로 환산*하는 것이다.
+
+- **temporal_shift 연속 감점화**: Δ=0.25~1.25 구간을 -5 ~ -30점으로 선형 보간. 0.25 미만은 0점, 1.25 이상은 -30점 cap
+  - 기존 계단형: Δ=0.50, 0.75, 0.99 모두 동일하게 -15점
+  - 신규 연속형: Δ=0.50→-11.2, 0.75→-17.5, 0.99→-23.6, 1.00→-23.8, 1.25→-30.0
+  - 임계값 직후 점프가 사라지고 *입장 이동량에 비례한 부드러운 감점* 적용
+- **JSON 룰 발화 연속 감점화**: 기존 severity_band 고정 감점(-3/-6/-10/-15)을 다음 공식으로 환산
+  - `penalty = severity_base × rule_strength × activation`
+  - `rule_strength = 0.5×risk_w + 0.3×distortion_w + 0.2×(1−consensus_w)` — 룰셋이 제공하는 4개 가중치 메타데이터가 실제 감점에 직접 반영됨
+  - `activation = max(polarity_shift / 1.25, 0.35 if has_logic_conflict else 0)` — 시계열 변화가 작으면 룰 활성화도 약해짐
+  - 본 변경으로 *시계열 신호와 룰 신호가 결합*된다 (시계열 변화 없는 텍스트에서는 룰 발화도 약화)
+- **JSON 메타 신규 필드**: `dimension_alignment_note_ko` 추가. ValueAnchor↔dimension 매핑 정합성 명시
+- **버전 표기**: 룰셋 `v2.1.2-dimension-aligned-continuous-scoring`, Python 헤더 `v2.1.2-continuous-scoring`
+
+### v1.2.1 (이전) — dimension 정합성 정리 + 안전망 경고화
 
 v1.2의 시계열 중심 가중치 보정은 유지하되, 방금 점검한 Python↔JSON↔OWL 3층 정합성을 문서와 룰셋 수준까지 정리한 버전이다. 핵심은 *점수 공식의 동기화*와 *ValueAnchor↔dimension 매핑의 정렬*이다.
 
@@ -339,7 +365,7 @@ v1.2의 시계열 중심 가중치 보정은 유지하되, 방금 점검한 Pyth
 
 - **`conflictsWith` 관계의 임시성** — 21개 Value↔Frame 충돌 관계는 합리적 가정으로 정의된 것이지, *집단지성으로 검증된* 것이 아니다. 페르소나 자료의 *"잘 정의된 집단지성 위에 자리잡아야 한다"*는 비전 기준에서 보면, 이 관계 자체가 *임시 파라미터*다.
 - **`layer_social_meaning_proxy`의 가중치는 임의 파라미터** — 본래 비전은 *집단지성의 주기적 측정*에 기반한 가중치이지만, 본 프로토타입에서는 임시 대체하고 있다.
-- **`dimension_weights`(0.40/0.22/0.15/0.13/0.10)와 `per_dim_cap=45`는 튜닝 파라미터** — v1.2.1에서 시계열 중심 보정과 dimension 정합성 점검을 거친 합리적 기본값이지만, 실측 보도 코퍼스로 검증된 값이 아니다. *시계열 단독 위반 → 정합 끝*, *복합 위반 → 주의/왜곡* 분포를 의도한 잠정값이다.
+- **`dimension_weights`(0.40/0.22/0.15/0.13/0.10)와 `per_dim_cap=45`는 튜닝 파라미터** — v1.2.2까지 시계열 중심 보정, dimension 정합성 점검, 연속 감점화를 거쳐 정립된 합리적 기본값이지만, 실측 보도 코퍼스로 검증된 값이 아니다. *시계열 단독 위반 → 정합 끝*, *복합 위반 → 주의/왜곡* 분포를 의도한 잠정값이다.
 - **M04 VictimBlaming 부재** — OWL 어휘로는 존재하나 룰셋에는 미포함. 민감 도메인 가이드라인 정립 후 추가 예정.
 - **2-텍스트 비교** — 현재는 과거/현재 두 텍스트의 직접 비교만 지원. *동일 매체-동일 사안의 N개 기사 묶음*에 대한 시계열 분석은 다음 단계.
 - **OpenAI API 의존** — 클라우드 LLM 의존. 향후 로컬 sLLM 옵션 추가 검토.
@@ -360,7 +386,7 @@ v1.2의 시계열 중심 가중치 보정은 유지하되, 방금 점검한 Pyth
   - 4단계 검증 체인 (Validity / Polarity / Graph / Rule)
   - Pure LLM 비교 버전 (`comparison/`)
 
-- [x] **3.5단계 — 5차원 평가 + 룰셋 확장 + 시계열 중심 보정 (v1.1~v1.2.1)**
+- [x] **3.5단계 — 5차원 평가 + 룰셋 확장 + 시계열 중심 보정 (v1.1~v1.2.2)**
   - `evidence_quality` 차원 신설 및 `dimension_weights` 도입
   - 1024개 룰셋 (M03·M05·M06 확장)
   - `weighted_distortion` 정규화 점수 계산
@@ -369,6 +395,7 @@ v1.2의 시계열 중심 가중치 보정은 유지하되, 방금 점검한 Pyth
   - per_dim_cap 60 → 45 (단일 차원 위반의 영역 보정)
   - Stage 2 polarity shift 페널티를 `temporal_shift` 차원에 직접 반영
   - JSON + OWL + Python 3층 동시 갱신 및 ValueAnchor↔dimension 매핑 정합성 정리
+  - Stage 2 polarity shift와 JSON 룰 발화를 *계단형*에서 *연속 감점*으로 환산 (임계값 직후 점프 해소, 룰셋의 4개 가중치 메타데이터를 실제 감점에 직접 반영)
 
 - [ ] **4단계 — 기사 묶음 일괄 분석 (Streamlit)** — 작업 진행 중
   - 5개 차원 지표 + 1024 룰 + 시계열 sentiment 그래프
