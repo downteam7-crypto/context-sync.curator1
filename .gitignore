@@ -5,6 +5,9 @@
 venv/
 env/
 
+# Streamlit
+.streamlit/secrets.toml
+
 # Python
 __pycache__/
 *.py[cod]
@@ -19,12 +22,16 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# IDE
+# IDE / Editor
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Logs / cache
 *.log
@@ -32,9 +39,39 @@ dist/
 gradio_cached_examples/
 flagged/
 
-# Large data (개발 시 임시 보관용)
+# Model / ML cache
+models/
+model_cache/
+*.pkl
+*.joblib
+*.npy
+*.npz
+
+# Large data (development-only temporary storage)
 data/
 *.csv
 *.parquet
 *.feather
 embeddings/
+
+# Temporary outputs
+outputs/
+reports/
+downloads/
+
+# Vector stores / local databases
+vector_store/
+*.db
+*.sqlite
+
+# Hugging Face / local model cache
+hf_cache/
+*.safetensors
+*.bin
+*.pt
+*.gguf
+
+# Archives / local bundles
+*.zip
+*.tar
+*.gz

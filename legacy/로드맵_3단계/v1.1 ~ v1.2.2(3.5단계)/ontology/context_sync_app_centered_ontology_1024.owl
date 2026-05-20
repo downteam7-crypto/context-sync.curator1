@@ -227,7 +227,7 @@
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#engine_context_sync_rule_engine">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#RuleEngine"/>
     <rdfs:label xml:lang="en">Context-Sync Rule Engine</rdfs:label>
-    <evaluationFormula xml:lang="en">final_distortion = 0.34*temporal_shift + 0.24*frame_effect + 0.18*context_omission + 0.14*consensus_deviation + 0.10*evidence_quality; verdict thresholds: &lt;35 aligned, 35-64 caution, &gt;=65 deviated; per_dim_cap=40 (baseline); strict_temporal_profile=0.40/cap45 optional</evaluationFormula>
+    <evaluationFormula xml:lang="en">final_distortion = 0.40*temporal_shift + 0.22*frame_effect + 0.15*context_omission + 0.13*consensus_deviation + 0.10*evidence_quality; verdict thresholds: &lt;35 aligned, 35-64 caution, &gt;=65 deviated; per_dim_cap=45 (v2.1.1-dimension-aligned)</evaluationFormula>
     <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_aligned"/>
     <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_caution"/>
     <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_deviated"/>
@@ -754,8 +754,8 @@
     <rdfs:label>news_rules_1024.json</rdfs:label>
     <externalRuleFile>news_rules_1024.json</externalRuleFile>
     <ruleCount rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1024</ruleCount>
-    <version>v2.1.4-baseline-restored-with-explanation-mitigation</version>
-    <descriptionKo xml:lang="ko">evidence_quality를 포함한 5차원 평가식과 OWL 확장 프레임 M03/M05/M06, M02 보강분을 반영한 1024개 외부 JSON 룰셋. v2.1.4에서는 OWL baseline 가중치(0.34/0.24/0.18/0.14/0.10)와 per_dim_cap=40을 기본값으로 복귀하고, 설명 충실도에 따른 부가 페널티 완화(explanation mitigation)를 엔진 계층에서 반영한다.</descriptionKo>
+    <version>v2.1.0-temporal-weighted</version>
+    <descriptionKo xml:lang="ko">v2.0.0 (1024 룰셋, 5차원 평가식)에 시계열 중심 가중치 보정을 반영. temporal_shift 0.40으로 강화, per_dim_cap=45로 단일 차원 폭주 방지. 본 시스템이 시계열 정합성 검토 도구임을 가중치 차원에서 선언.</descriptionKo>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Diplomacy">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>
