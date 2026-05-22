@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 DIMENSIONS = ["temporal_shift", "frame_effect", "context_omission", "consensus_deviation", "evidence_quality"]
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+try:
+    import transformers
+    HAS_TRANSFORMERS = True
+except ImportError:
+    HAS_TRANSFORMERS = False
+
+if HAS_TRANSFORMERS and os.getenv("STREAMLIT_CLOUD", "1") != "1":
+    DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+else:
+    DEFAULT_MODEL = "gpt-4o-mini"
 
 
 def _compact_articles(articles: List[Dict[str, Any]], max_chars: int = 6500) -> str:
@@ -187,6 +197,89 @@ def _format_rules(rules: List[Dict[str, Any]]) -> str:
             f"context={r.get('context')}, cue={', '.join(r.get('positive_cues', [])[:2])}"
         )
     return "\n".join(lines)
+
+
+def compare_rag_results(
+    articles: List[Dict[str, Any]],
+    rules_data: Dict[str, Any],
+    top_k: int = 8,
+    dense_model: Optional[Any] = None,
+    rule_embeddings: Optional[Any] = None,
+    min_sparse_score: float = 0.001,
+    min_dense_score: float = 0.15,
+) -> Dict[str, Any]:
+    """같은 기사에 대해 Sparse(Jaccard 키워드 매칭)와 Dense(ko-sroberta 의미 임베딩)를 동시에 실행해 비교한다.
+
+    scikit-learn이 설치되지 않은 환경(예: Streamlit Cloud)에서는 Dense RAG를 안전하게 비활성화한다.
+    """
+    # 1. Sparse RAG (Jaccard Similarity)
+    article_text = " ".join(
+        " ".join(str(a.get(k, "")) for k in ["title", "subtitle", "summary", "body", "text", "content"] if a.get(k))
+        for a in articles
+    )
+    article_tokens = set(re.findall(r"[0-9A-Za-z가-힣_]+", article_text.lower()))
+    sparse_scores = []
+    
+    rules = rules_data.get("rules", [])
+    for rule in rules:
+        rt = _rule_text(rule).lower()
+        rule_tokens = set(re.findall(r"[0-9A-Za-z가-힣_]+", rt))
+        if not rule_tokens or not article_tokens:
+            score = 0.0
+        else:
+            score = len(article_tokens & rule_tokens) / max(1, len(article_tokens | rule_tokens))
+        if score >= min_sparse_score:
+            sparse_scores.append((score, rule))
+            
+    sparse_scores.sort(key=lambda x: x[0], reverse=True)
+    sparse_top = sparse_scores[:top_k]
+    
+    # 2. Dense RAG
+    dense_available = False
+    dense_top = []
+    dense_filtered_count = 0
+    
+    if dense_model is not None and rule_embeddings is not None:
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+            query_emb = dense_model.encode([article_text])
+            sims = cosine_similarity(query_emb, rule_embeddings)[0]
+            
+            dense_scores = []
+            for sim, r in zip(sims, rules):
+                sim_val = float(sim)
+                if sim_val >= min_dense_score:
+                    dense_scores.append((sim_val, r))
+            dense_scores.sort(key=lambda x: x[0], reverse=True)
+            dense_top = dense_scores[:top_k]
+            dense_filtered_count = len(dense_scores)
+            dense_available = True
+        except Exception:
+            dense_available = False
+            dense_top = []
+            dense_filtered_count = 0
+
+    # 3. Intersect / Difference analysis
+    sparse_ids = [r.get("rule_id") for _, r in sparse_top]
+    dense_ids = [r.get("rule_id") for _, r in dense_top] if dense_available else []
+    
+    common_ids = list(set(sparse_ids) & set(dense_ids))
+    sparse_only_ids = list(set(sparse_ids) - set(dense_ids))
+    dense_only_ids = list(set(dense_ids) - set(sparse_ids))
+    
+    return {
+        "sparse_available": bool(sparse_top),
+        "dense_available": dense_available,
+        "sparse_top": sparse_top,
+        "dense_top": dense_top,
+        "common_ids": common_ids,
+        "sparse_only_ids": sparse_only_ids,
+        "dense_only_ids": dense_only_ids,
+        "min_sparse_score": min_sparse_score,
+        "min_dense_score": min_dense_score,
+        "sparse_filtered_count": len(sparse_scores),
+        "dense_filtered_count": dense_filtered_count,
+    }
 
 
 def extract_features_with_sllm(
