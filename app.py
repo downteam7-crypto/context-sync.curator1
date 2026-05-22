@@ -458,11 +458,11 @@ def render_rule_heatmap(fired_rules: list[dict], candidate_rules: list[dict]):
     hm_df = pd.DataFrame(rows)
     st.markdown("**Dimension × rule source**")
     dim_pivot = hm_df.pivot_table(index="dimension", columns="source", values="count", aggfunc="sum", fill_value=0)
-    st.dataframe(dim_pivot, use_container_width=True)
+    st.dataframe(dim_pivot, width="stretch")
 
     st.markdown("**Schema type × rule source**")
     schema_pivot = hm_df.pivot_table(index="schema_type", columns="source", values="count", aggfunc="sum", fill_value=0)
-    st.dataframe(schema_pivot, use_container_width=True)
+    st.dataframe(schema_pivot, width="stretch")
 
     st.markdown("**Penalty sum by dimension**")
     penalty_df = hm_df.groupby("dimension", as_index=False)["penalty_abs"].sum().sort_values("penalty_abs", ascending=False)
@@ -498,7 +498,7 @@ with tab1:
                 sc_cols = st.columns(len(scenarios))
                 for idx, sc in enumerate(scenarios):
                     with sc_cols[idx]:
-                        if st.button(sc["label"], key=f"sc_{sc['id']}", use_container_width=True):
+                        if st.button(sc["label"], key=f"sc_{sc['id']}", width="stretch"):
                             st.session_state.article_list = sc["articles"]
                             st.rerun()
                         st.caption(f"기대: {sc.get('expected_verdict', '-')}")
@@ -514,7 +514,7 @@ with tab1:
             f_title  = st.text_input("제목 *", placeholder="기사 제목을 입력하세요")
             f_subtitle = st.text_input("부제/요약 (선택)", placeholder="기사 부제, 리드문, 요약문이 있으면 입력하세요")
             f_body   = st.text_area("본문 *", placeholder="기사 본문을 여기에 붙여넣으세요. 길이 제한 없음.", height=200)
-            submitted = st.form_submit_button("➕ 기사 추가", use_container_width=True, type="primary")
+            submitted = st.form_submit_button("➕ 기사 추가", width="stretch", type="primary")
 
         if submitted:
             if not f_title.strip() and not f_body.strip():
@@ -542,10 +542,10 @@ with tab1:
                 }
                 for i, a in enumerate(st.session_state.article_list)
             ]
-            st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(preview_rows), width="stretch", hide_index=True)
 
             col_clr, col_json = st.columns([1, 3])
-            if col_clr.button("🗑️ 전체 초기화", use_container_width=True):
+            if col_clr.button("🗑️ 전체 초기화", width="stretch"):
                 st.session_state.article_list = []
                 st.rerun()
             with col_json.expander("📋 자동 생성된 JSON 보기"):
@@ -580,7 +580,7 @@ with tab1:
         )
 
         c_fetch, c_clear = st.columns([2, 1])
-        if c_fetch.button("🌐 URL에서 기사 불러오기", use_container_width=True, type="primary"):
+        if c_fetch.button("🌐 URL에서 기사 불러오기", width="stretch", type="primary"):
             urls = [u.strip() for u in url_text.splitlines() if u.strip()]
             if not urls:
                 st.warning("URL을 하나 이상 입력해 주세요.")
@@ -599,9 +599,9 @@ with tab1:
                     st.success(f"{added}개 기사 추출 완료 (현재 {len(st.session_state.article_list)}개)")
                 if failures:
                     st.warning(f"{len(failures)}개 URL은 추출에 실패했습니다.")
-                    st.dataframe(pd.DataFrame(failures), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(failures), width="stretch", hide_index=True)
 
-        if c_clear.button("🗑️ URL/직접 입력 기사 초기화", use_container_width=True):
+        if c_clear.button("🗑️ URL/직접 입력 기사 초기화", width="stretch"):
             st.session_state.article_list = []
             st.rerun()
 
@@ -618,7 +618,7 @@ with tab1:
                 }
                 for i, a in enumerate(st.session_state.article_list)
             ]
-            st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(preview_rows), width="stretch", hide_index=True)
             with st.expander("📋 URL 추출 결과 JSON 보기"):
                 st.code(json.dumps(st.session_state.article_list, ensure_ascii=False, indent=2), language="json")
             articles = st.session_state.article_list
@@ -646,7 +646,7 @@ with tab1:
     # ── 분석 실행 (두 모드 공통) ──────────────────────────────────────────────
     st.divider()
     if st.button("🔍 시계열 논조 분석 실행", type="primary", disabled=bool(err) or not articles,
-                 use_container_width=True):
+                 width="stretch"):
         sllm_meta = None
         manual_features = None
 
@@ -717,7 +717,7 @@ with tab1:
                             }
                             for s, r in rag_cmp["sparse_top"]
                         ])
-                        st.dataframe(sp_df, use_container_width=True, hide_index=True)
+                        st.dataframe(sp_df, width="stretch", hide_index=True)
                     with rcol2:
                         st.markdown("##### 🧠 Dense (ko-sroberta 의미 임베딩)")
                         st.caption("의미적 유사성·구조적 패턴 매칭에 강함")
@@ -732,7 +732,7 @@ with tab1:
                                 }
                                 for s, r in rag_cmp["dense_top"]
                             ])
-                            st.dataframe(de_df, use_container_width=True, hide_index=True)
+                            st.dataframe(de_df, width="stretch", hide_index=True)
                         else:
                             st.warning(
                                 "Dense RAG가 비활성화되어 있거나, 최소 similarity 기준을 통과한 룰이 없습니다. "
@@ -841,11 +841,11 @@ with tab1:
                     }
                     for h in red.get("hits", [])
                 ])
-                st.dataframe(rc_df, use_container_width=True, hide_index=True)
+                st.dataframe(rc_df, width="stretch", hide_index=True)
             trace = result.get("validity_trace", [])
             if trace:
                 with st.expander("🧬 Stage 0 Validity Reasoning Trace", expanded=True):
-                    st.dataframe(pd.DataFrame(trace), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(trace), width="stretch", hide_index=True)
 
         if result.get("dimension_breakdown"):
             with st.expander("⚙️ 최종 axiom 차원별 페널티 분해 (graph audit 우선)", expanded=True):
@@ -860,7 +860,7 @@ with tab1:
                     }
                     for dim in DIMENSIONS
                 ])
-                st.dataframe(bd_df, use_container_width=True, hide_index=True)
+                st.dataframe(bd_df, width="stretch", hide_index=True)
                 st.bar_chart(bd_df.set_index("dimension")["기여 distortion"])
 
         if sllm_meta:
@@ -882,14 +882,14 @@ with tab1:
         feature_df = pd.DataFrame(
             [{"dimension": k, "score": v, "weight": result["weights"].get(k, 0)} for k, v in result["features"].items()]
         )
-        st.dataframe(feature_df, use_container_width=True, hide_index=True)
+        st.dataframe(feature_df, width="stretch", hide_index=True)
         st.bar_chart(feature_df.set_index("dimension")["score"])
 
         if result["series"]:
             st.subheader("3. 기사별 시계열 신호")
             series_df = pd.DataFrame(result["series"]).copy()
             article_rows_df = pd.DataFrame(result["article_rows"])
-            st.dataframe(article_rows_df, use_container_width=True, hide_index=True)
+            st.dataframe(article_rows_df, width="stretch", hide_index=True)
             if "sentiment" in series_df:
                 try:
                     import plotly.express as px
@@ -921,7 +921,7 @@ with tab1:
                             showarrow=True,
                             arrowhead=2,
                         )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
                     delta_rows = []
                     for i in range(1, len(plot_df)):
@@ -933,7 +933,7 @@ with tab1:
                         })
                     if delta_rows:
                         with st.expander("📈 인접 기사 sentiment 변화량", expanded=False):
-                            st.dataframe(pd.DataFrame(delta_rows), use_container_width=True, hide_index=True)
+                            st.dataframe(pd.DataFrame(delta_rows), width="stretch", hide_index=True)
                 except Exception:
                     st.line_chart(series_df.set_index("date")["sentiment"])
 
@@ -969,7 +969,7 @@ with tab1:
                         "verdict": audit.get("anchor_verdict"),
                         "fired_rules": len(audit.get("fired_rules", [])),
                     })
-                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
 
                 for idx, audit in enumerate(graph_audits):
                     label_prefix = "★ MAIN — " if idx == 0 else ""
@@ -1023,7 +1023,7 @@ with tab1:
                             }
                             for d in DIMENSIONS
                         ])
-                        st.dataframe(bd_df, use_container_width=True, hide_index=True)
+                        st.dataframe(bd_df, width="stretch", hide_index=True)
 
                         # [v4 보강] OWL Reasoning Trace Table — ontology-calibrated reasoning의 논리 사슬
                         trace = build_reasoning_trace(audit)
@@ -1034,7 +1034,7 @@ with tab1:
                                 "ValueAnchor → OWL relation → calibratesDimension → penalty → fired_rule의 *논리 사슬*이 추적됨."
                             )
                             trace_df = pd.DataFrame(trace)
-                            st.dataframe(trace_df, use_container_width=True, hide_index=True)
+                            st.dataframe(trace_df, width="stretch", hide_index=True)
 
                         st.markdown("**audit reasons (그래프 추론 + 룰 발화 추적)**")
                         for r in audit.get("reasons", []):
@@ -1054,7 +1054,7 @@ with tab1:
                                 }
                                 for r in audit["fired_rules"][:10]
                             ])
-                            st.dataframe(fr_df, use_container_width=True, hide_index=True)
+                            st.dataframe(fr_df, width="stretch", hide_index=True)
 
         # ─────────────────────────────────────────────────────────
         # [4단계 보강] adjacent pair audit — 중간 변곡 구간 탐지
@@ -1079,7 +1079,7 @@ with tab1:
                     "verdict": audit.get("anchor_verdict", "-"),
                     "fired_rules": len(audit.get("fired_rules", [])),
                 })
-            st.dataframe(pd.DataFrame(adj_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(adj_rows), width="stretch", hide_index=True)
 
             with st.expander("📌 최대 인접 변곡 구간 상세", expanded=False):
                 audit = adjacent_audits[0]
@@ -1105,7 +1105,7 @@ with tab1:
             st.markdown("**Actual axiom fired_rules** — 최종 axiom_distortion에 직접 기여한 룰")
             hide_cols = ["llm_instruction_ko", "positive_cues", "negative_indicators",
                          "frame_definition_ko", "schema_description_ko", "expected_evidence_ko", "score_hint"]
-            st.dataframe(fired_df.drop(columns=hide_cols, errors="ignore"), use_container_width=True, hide_index=True)
+            st.dataframe(fired_df.drop(columns=hide_cols, errors="ignore"), width="stretch", hide_index=True)
         else:
             st.info("최종 graph audit에서 실제 axiom fired_rules가 없거나 graph audit이 불가능했습니다. 아래 후보 규칙은 보조 참고용입니다.")
 
@@ -1113,7 +1113,7 @@ with tab1:
             with st.expander("📋 Feature 기반 후보 규칙 + axiom penalty 메타", expanded=not fired_df.empty):
                 visible_df = candidate_df.drop(columns=["llm_instruction_ko", "positive_cues", "negative_indicators",
                                                         "frame_definition_ko", "schema_description_ko", "expected_evidence_ko", "score_hint"], errors="ignore")
-                st.dataframe(visible_df, use_container_width=True, hide_index=True)
+                st.dataframe(visible_df, width="stretch", hide_index=True)
                 for r in result.get("candidate_rules", result.get("matched_rules", []))[:5]:
                     st.markdown(f"**`{r.get('rule_id')}`** — {r.get('schema_id')} / {r.get('target_frame')}")
                     rcols = st.columns(4)
@@ -1169,7 +1169,7 @@ with tab1:
             data=export_json,
             file_name="context_sync_result.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )
         # CSV export
         csv_rows = result["article_rows"].copy() if result["article_rows"] else []
@@ -1187,7 +1187,7 @@ with tab1:
             data=export_csv,
             file_name="context_sync_result.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
 
         # ── [E] 의미 공간 시각화 (Dense Embedding) ────────────────────────────────
@@ -1242,7 +1242,7 @@ with tab1:
                                 showlegend=True,
                                 margin=dict(l=20, r=20, t=30, b=20)
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width="stretch")
                             st.caption("PCA(주성분 분석)를 통해 차원을 2D로 축소했습니다. 거리가 가까울수록 의미적으로 유사함을 나타냅니다.")
                 except Exception as e:
                     st.error(f"시각화 중 오류가 발생했습니다: {e}")
@@ -1364,7 +1364,7 @@ with tab2:
             for dim in ["temporal_shift", "frame_effect", "context_omission", "consensus_deviation", "evidence_quality"]
         ])
         st.markdown("##### 차원별 기여도 분해")
-        st.dataframe(wf_df, use_container_width=True, hide_index=True)
+        st.dataframe(wf_df, width="stretch", hide_index=True)
         st.bar_chart(wf_df.set_index("dimension")["기여도"])
 
         # 판정 근거
@@ -1373,7 +1373,7 @@ with tab2:
         # 활성 규칙
         if result["matched_rules"]:
             with st.expander("후보 규칙 목록", expanded=False):
-                st.dataframe(pd.DataFrame(result["matched_rules"]), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(result["matched_rules"]), width="stretch", hide_index=True)
 
 
     st.divider()
@@ -1404,7 +1404,7 @@ with tab2:
     sim_m1, sim_m2 = st.columns(2)
     sim_m1.metric("weighted_distortion", f"{sim_distortion:.1f}")
     sim_m2.metric("coherence_score", f"{100 - sim_distortion:.1f}")
-    st.dataframe(sim_df, use_container_width=True, hide_index=True)
+    st.dataframe(sim_df, width="stretch", hide_index=True)
     st.bar_chart(sim_df.set_index("dimension")["contribution"])
 
 with tab3:
@@ -1415,18 +1415,18 @@ with tab3:
     s3.metric("프레임 Top10 수", len(summary["by_frame_top10"]))
 
     st.write("**차원별 규칙 수**")
-    st.dataframe(pd.DataFrame(summary["by_dimension"].items(), columns=["dimension", "count"]), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary["by_dimension"].items(), columns=["dimension", "count"]), width="stretch", hide_index=True)
     st.write("**Schema type별 규칙 수**")
-    st.dataframe(pd.DataFrame(summary["by_schema_type"].items(), columns=["schema_type", "count"]), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary["by_schema_type"].items(), columns=["schema_type", "count"]), width="stretch", hide_index=True)
     st.write("**상위 프레임**")
-    st.dataframe(pd.DataFrame(summary["by_frame_top10"].items(), columns=["target_frame", "count"]), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(summary["by_frame_top10"].items(), columns=["target_frame", "count"]), width="stretch", hide_index=True)
 
     query = st.text_input("규칙 검색", placeholder="예: SilentPivot, temporal_shift, Election")
     if query:
         q = query.lower()
         filtered = [r for r in rules if q in json.dumps(r, ensure_ascii=False).lower()]
         st.write(f"검색 결과: {len(filtered)}개")
-        st.dataframe(pd.DataFrame(filtered[:100]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(filtered[:100]), width="stretch", hide_index=True)
 
     with st.expander("OWL 일부 정보"):
         st.write(f"파일: `{ONTOLOGY_PATH.name}`")
