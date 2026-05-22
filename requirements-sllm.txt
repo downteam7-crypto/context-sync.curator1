@@ -1,5 +1,5 @@
-# Optional dependencies for local/open-source sLLM inference.
-# Install only when you want to run the sLLM extraction mode.
+# Optional local dependencies for Dense RAG and open-source sLLM inference.
+# Use this on a local machine, not on Streamlit Community Cloud.
 -r requirements.txt
 transformers>=4.46
 sentencepiece>=0.2
@@ -7,4 +7,3 @@ accelerate>=0.33
 torch>=2.3
 sentence-transformers>=3.0
 scikit-learn>=1.0
-plotly>=5.0

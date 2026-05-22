@@ -20,10 +20,19 @@ DEFAULT_WEIGHTS = {
     "evidence_quality": 0.10,
 }
 
-# [v1.2.4 baseline-restored] OWL baseline 가중치 복귀 + cap 40.
-# 시계열 정합성은 여전히 최상위 차원이지만, frame/context/consensus/evidence와 공동 판단한다.
-# 0.40/cap45는 "시계열 엄격" 프로파일로 유지하고, 기본 엔진은 OWL baseline을 따른다.
-PER_DIM_CAP = 40.0
+# [v1.2.6] Headline/subtitle weighting
+# 제목과 부제는 독자가 가장 먼저 접하는 프레임 장치이므로 본문보다 약간 높은 가중치를 둔다.
+# 단, 낚시성 표현 하나가 전체 판정을 과도하게 흔들지 않도록 2배 이상으로 올리지 않는다.
+TITLE_CUE_WEIGHT = 1.5
+SUBTITLE_CUE_WEIGHT = 1.25
+BODY_CUE_WEIGHT = 1.0
+
+# [v2.x baseline] OWL baseline 가중치 + per_dim_cap 45.
+# 시계열 정합성은 최상위 차원이되 frame/context/consensus/evidence와 공동 판단한다.
+# cap 45는 "입장 변화 자체"(major shift 단독 ~22.7점)와 "설명 없는 조용한 전환"
+# (silent pivot 부가 페널티가 cap을 채우며 34점 상한 수렴)을 점수 폭으로 분리하기 위한 값이다.
+# 시뮬레이터 프로파일: sensitive=40 / default=45 / conservative=60.
+PER_DIM_CAP = 45.0
 
 SEVERITY_MULTIPLIER = {
     "low": 0.65,
@@ -39,6 +48,34 @@ SEVERITY_BASE = {
     "medium": 7.0,
     "low": 4.0,
 }
+
+# [v2.1.8] Frame-level soft cap + effective cap mitigation
+# 1024개 룰셋은 관찰/설명력을 높이기 위해 유사 프레임의 세부 룰을 많이 가진다.
+# 그러나 같은 target_frame 룰이 여러 개 동시에 발화했다고 해서 모두 독립 위반으로
+# 단순 누적하면 per_dim_cap(45/60 등)이 즉시 100%에 도달해 cap 프로파일의
+# 설명력이 사라진다. 따라서 rule-level evidence는 보존하되, score-level penalty는
+# (target_frame, dimension) 단위로 묶어 아래 상한 안에서만 반영한다.
+# cap=18의 의미: 동일 프레임 반복 증거는 critical 단일 룰 1개치(SEVERITY_BASE=18)를
+# 기본 최대치로 본다. 즉 "프레임이 강하게 감지됨"은 보존하되, 독립 위반 10건처럼
+# 누적하지 않는다. 설명 충실도가 검증된 경우에는 effective_frame_cap = base_cap ×
+# mitigation_factor로 cap 자체도 낮춰, 설명 있는 전환과 설명 없는 silent pivot을 구분한다.
+FRAME_SOFT_CAPS = {
+    "SilentPivot": 18.0,
+    "RetroactiveReframing": 18.0,
+    "SelectiveMemory": 14.0,
+    "ContextOmission": 14.0,
+    "FalseBalance": 14.0,
+    "CrisisInflation": 12.0,
+    "VictimBlaming": 18.0,
+}
+DEFAULT_FRAME_SOFT_CAP = 12.0
+EXPLANATION_SENSITIVE_FRAMES = {"SilentPivot", "RetroactiveReframing", "SelectiveMemory", "ContextOmission"}
+
+# Explanation mitigation은 단어 등장만으로 과도하게 완화되지 않도록 보수적 tier를 둔다.
+# 0.50(strong)은 과거 입장/기준 인지 + 새 근거/조건 변화 + 변경 이유 설명이 함께 보일 때만 목표로 한다.
+EXPLANATION_EVIDENCE_CUES = ["새로운 증거", "새 증거", "자료", "데이터", "통계", "보고서", "원문", "공개", "확인", "조사", "판결", "결정"]
+EXPLANATION_CHANGE_CUES = ["조건 변화", "상황 변화", "정책 변경", "제도 변화", "기준 변경", "환경 변화", "바뀌", "달라졌", "변경", "전환"]
+EXPLANATION_ACK_CUES = ["과거", "이전", "당시", "기존", "종전", "입장", "판단", "평가", "수정", "재검토"]
 
 POSITIVE_LEXICON = [
     "성과", "개선", "필요", "긍정", "기대", "안정", "회복", "확대", "성장", "합리", "미래", "불가피", "개혁",
@@ -83,12 +120,66 @@ def parse_date(value: Any) -> datetime:
     return datetime.min
 
 
+def article_field_texts(article: Dict[str, Any]) -> Dict[str, str]:
+    """기사 필드를 제목/부제/본문으로 분리한다.
+
+    subtitle 필드가 없으면 summary, description, lead를 순서대로 fallback한다.
+    """
+    title = str(article.get("title", "") or "")
+    subtitle = str(
+        article.get("subtitle")
+        or article.get("sub_title")
+        or article.get("summary")
+        or article.get("description")
+        or article.get("lead")
+        or ""
+    )
+    body = str(article.get("body") or article.get("text") or article.get("content") or "")
+    return {"title": title, "subtitle": subtitle, "body": body}
+
+
 def text_of(article: Dict[str, Any]) -> str:
-    return " ".join(str(article.get(k, "")) for k in ["title", "summary", "body", "text", "content"] if article.get(k))
+    """기사 텍스트 합성.
+
+    graph audit처럼 text 문자열만 받는 경로에서도 제목 프레임을 놓치지 않도록
+    제목을 한 번 더 포함한다. 정밀 cue 계산은 weighted_count_hits_article에서
+    title=1.5, subtitle=1.25, body=1.0으로 처리한다.
+    """
+    fields = article_field_texts(article)
+    parts = [
+        fields["title"],
+        fields["title"],      # text-only downstream을 위한 headline emphasis
+        fields["subtitle"],
+        fields["body"],
+    ]
+    return " ".join(p for p in parts if p)
 
 
 def count_hits(text: str, cues: Iterable[str]) -> int:
     return sum(text.count(cue) for cue in cues if cue)
+
+
+def weighted_count_hits_article(article: Dict[str, Any], cues: Iterable[str]) -> float:
+    """제목/부제/본문별 cue 가중합.
+
+    제목은 실제 뉴스 소비에서 프레임을 강하게 형성하지만, 과도한 단일 표현으로
+    전체 점수가 흔들리지 않도록 mild weighting(1.5)을 적용한다.
+    """
+    fields = article_field_texts(article)
+    return (
+        TITLE_CUE_WEIGHT * count_hits(fields["title"], cues)
+        + SUBTITLE_CUE_WEIGHT * count_hits(fields["subtitle"], cues)
+        + BODY_CUE_WEIGHT * count_hits(fields["body"], cues)
+    )
+
+
+def weighted_sentiment_score_article(article: Dict[str, Any]) -> float:
+    """제목/부제/본문 가중치를 반영한 sentiment polarity."""
+    pos = weighted_count_hits_article(article, POSITIVE_LEXICON)
+    neg = weighted_count_hits_article(article, NEGATIVE_LEXICON)
+    if pos + neg == 0:
+        return 0.0
+    return (pos - neg) / (pos + neg)
 
 
 def compute_explanation_mitigation_signal(past_text: str, present_text: str) -> Dict[str, Any]:
@@ -96,33 +187,48 @@ def compute_explanation_mitigation_signal(past_text: str, present_text: str) -> 
 
     원칙:
     - stance polarity의 Δ 자체는 줄이지 않는다.
-    - 다만 현재 기사에 전환 사유, 조건 변화, 근거 갱신, 정정/반론이 충분히 있으면
-      SilentPivot/RetroactiveReframing류의 추가 graph/rule penalty를 부분 완화한다.
+    - 설명은 단순 cue 등장 여부가 아니라, 독자가 입장 변화의 이유를 추적할 수 있는지로 본다.
+    - 형식적/불충분한 설명은 0.90~0.75 수준으로 제한 완화하고,
+      strong(0.50)은 과거 기준 인지 + 새 근거/조건 변화 + 변경 이유가 비교적 함께 드러나는 경우에만 준다.
+    - 이 factor는 Stage 3/4의 부가 penalty와 explanation-sensitive frame의 effective_frame_cap에만 적용된다.
 
     Returns:
         {
             "present_context_expl_hits": int,
             "past_context_expl_hits": int,
             "present_omission_hits": int,
-            "mitigation_factor": float,  # 1.0=no mitigation, 0.65=moderate, 0.50=strong
-            "level": "none|moderate|strong",
+            "explanation_category_hits": int,
+            "mitigation_factor": float,  # 1.0=none, 0.90=weak, 0.75=moderate, 0.50=strong
+            "level": "none|weak|moderate|strong",
             "reason": str,
         }
     """
     present_context = count_hits(present_text, CONTEXT_EXPLANATION_CUES)
     past_context = count_hits(past_text, CONTEXT_EXPLANATION_CUES)
     present_omission = count_hits(present_text, OMISSION_CUES)
+
+    evidence_hits = count_hits(present_text, EXPLANATION_EVIDENCE_CUES)
+    change_hits = count_hits(present_text, EXPLANATION_CHANGE_CUES)
+    ack_hits = count_hits(present_text, EXPLANATION_ACK_CUES)
+    category_hits = int(evidence_hits > 0) + int(change_hits > 0) + int(ack_hits > 0)
+
     # 현재 기사의 설명을 가장 강하게 보고, 과거 기사 배경설명은 보조 신호로만 반영한다.
     explanation_signal = present_context + 0.5 * past_context
 
-    if explanation_signal >= 4:
+    # strong은 엄격하게: cue 수가 많고, 적어도 두 종류 이상의 설명 범주가 함께 보여야 한다.
+    # 단순히 "상황이 바뀌었다" 수준이면 weak 또는 moderate에 머문다.
+    if present_context >= 4 and category_hits >= 2 and explanation_signal >= 4:
         factor = 0.50
         level = "strong"
-        reason = "전환 사유/조건 변화/근거 갱신 설명이 충분함"
-    elif explanation_signal >= 2:
-        factor = 0.65
+        reason = "과거 기준/조건 변화/새 근거를 추적할 수 있는 설명이 충분함"
+    elif present_context >= 2 and category_hits >= 1:
+        factor = 0.75
         level = "moderate"
-        reason = "전환 사유 설명이 일부 확인됨"
+        reason = "전환 사유 설명이 일부 확인되지만 완전한 설명 책임에는 미달"
+    elif present_context >= 1 or explanation_signal >= 1.5:
+        factor = 0.90
+        level = "weak"
+        reason = "형식적 설명 신호가 있으나 입장 변화 정당화에는 제한적"
     else:
         factor = 1.0
         level = "none"
@@ -133,10 +239,143 @@ def compute_explanation_mitigation_signal(past_text: str, present_text: str) -> 
         "past_context_expl_hits": past_context,
         "present_omission_hits": present_omission,
         "explanation_signal": round(explanation_signal, 2),
+        "explanation_category_hits": category_hits,
+        "evidence_explanation_hits": evidence_hits,
+        "change_explanation_hits": change_hits,
+        "acknowledgement_hits": ack_hits,
         "mitigation_factor": factor,
         "level": level,
         "reason": reason,
     }
+
+
+# ─────────────────────────────────────
+# Stage 0: Validity / Ethics Red Card
+# ─────────────────────────────────────
+
+_VALIDITY_NEGATION_CUES = [
+    "아니다", "아니며", "잘못", "허위", "거짓", "반박", "비판", "금지", "문제", "위험", "혐오표현", "차별금지",
+]
+
+_VALIDITY_RED_CARD_RULES = [
+    {
+        "category": "scientific_consensus_violation",
+        "label": "과학적 합의 정면 위배",
+        "patterns": [
+            r"지구\s*(?:는|가)?\s*평평",
+            r"평평한\s*지구",
+            r"지구\s*평면",
+            r"flat\s*earth",
+            r"earth\s*is\s*flat",
+        ],
+    },
+    {
+        "category": "protected_class_hate_or_discrimination",
+        "label": "보호집단 차별·혐오 또는 열등성 주장",
+        "patterns": [
+            r"(?:인종|민족|혈통)\s*(?:이|은|는|간)?[^\n.]{0,20}(?:우월|열등)",
+            r"(?:여성|장애인|이주민|난민|성소수자|종교|무슬림|유대인|흑인|아시아인|노인|아동)\s*(?:이|은|는)?[^\n.]{0,30}(?:열등|권리\s*없|배제해야|추방해야|제거해야)",
+            r"차별\s*(?:을|은|이)?\s*(?:정당화|옹호|찬성)",
+        ],
+    },
+    {
+        "category": "human_rights_red_card",
+        "label": "보편 인권 침해 옹호",
+        "patterns": [
+            r"(?:인종청소|제노사이드|대량학살)\s*(?:은|이|을)?[^\n.]{0,20}(?:정당|필요|찬성|옹호)",
+            r"(?:노예제|강제노동)\s*(?:는|은|을)?[^\n.]{0,20}(?:정당|필요|찬성|옹호)",
+            r"나치\s*(?:를|는|의)?[^\n.]{0,20}(?:옹호|찬양|정당화)",
+        ],
+    },
+]
+
+
+def _has_negating_context(text: str, start: int, end: int, window: int = 28) -> bool:
+    """red-card 후보 표현이 비판·반박·부정 맥락인지 간단히 걸러낸다."""
+    lo = max(0, start - window)
+    hi = min(len(text), end + window)
+    snippet = text[lo:hi]
+    return any(cue in snippet for cue in _VALIDITY_NEGATION_CUES)
+
+
+def detect_validity_red_card(text: str) -> Dict[str, Any]:
+    """최소한의 사실/윤리 기준 위반을 Stage 0에서 탐지한다.
+
+    설계 원칙:
+    - 시계열 정합성 점수와 별개의 상위 자격 심사다.
+    - 명시적 red-card만 잡는 보수적 휴리스틱이다.
+    - 비판/반박 문맥은 가능한 한 제외한다.
+    """
+    if not text or not str(text).strip():
+        return {"violation": False}
+    body = str(text).lower()
+    original = str(text)
+    for rule in _VALIDITY_RED_CARD_RULES:
+        for pat in rule["patterns"]:
+            m = re.search(pat, body, flags=re.IGNORECASE)
+            if not m:
+                continue
+            if _has_negating_context(original, m.start(), m.end()):
+                continue
+            matched = original[m.start():m.end()]
+            return {
+                "violation": True,
+                "category": rule["category"],
+                "label": rule["label"],
+                "matched_text": matched,
+                "pattern": pat,
+                "reason": f"Stage 0 validity red-card: {rule['label']} — '{matched}'",
+            }
+    return {"violation": False}
+
+
+def scan_articles_validity_red_card(articles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """기사 묶음 전체에서 validity red-card를 먼저 검사한다.
+
+    first↔last graph audit만으로는 중간 기사에 포함된 red-card를 놓칠 수 있으므로,
+    N개 기사 전체를 독립적으로 스캔한다.
+    """
+    hits: List[Dict[str, Any]] = []
+    for idx, article in enumerate(articles or [], 1):
+        text = text_of(article)
+        red = detect_validity_red_card(text)
+        if red.get("violation"):
+            red = dict(red)
+            red.update({
+                "article_index": idx,
+                "title": article.get("title", ""),
+                "date": article.get("date") or article.get("published_at") or "",
+                "outlet": article.get("outlet", ""),
+                "topic": article.get("topic", ""),
+            })
+            hits.append(red)
+    if not hits:
+        return {"violation": False, "hits": []}
+    first = hits[0]
+    return {
+        "violation": True,
+        "hits": hits,
+        "category": first.get("category"),
+        "label": first.get("label"),
+        "reason": first.get("reason"),
+    }
+
+
+def build_validity_trace(red_card: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Reasoning Trace용 Stage 0 red-card 이벤트."""
+    if not red_card or not red_card.get("violation"):
+        return []
+    hit_count = len(red_card.get("hits", [])) if isinstance(red_card.get("hits"), list) else 1
+    return [{
+        "stage": "Stage 0: Validity Red Card",
+        "trigger": red_card.get("reason") or red_card.get("label") or "validity violation",
+        "owl_relation": "validity_override",
+        "calibrated_dimension": "validity_score / final override",
+        "penalty": "override → final_distortion=100, coherence_score=0",
+        "source": red_card.get("category", "validity_red_card"),
+        "detail": f"최소 사실/윤리 기준 위반 {hit_count}건 감지. 5차원 가중합보다 우선하는 상위 자격 심사로 처리.",
+        "rule_ids": [],
+    }]
 
 
 def sentiment_score(text: str) -> float:
@@ -160,36 +399,27 @@ def load_ontology(path: Path) -> rdflib.Graph:
 
 
 def extract_owl_frame_cues(g: rdflib.Graph) -> List[str]:
-    """OWL 온톨로지에서 Frame 클래스의 label/keyword를 SPARQL로 추출해 반환.
+    """OWL 온톨로지에서 Frame 클래스의 label/keyword를 추출해 반환.
 
-    이 함수가 실행됨으로써 OWL이 단순 장식이 아닌 실제 어휘 기준층으로 작동한다.
+    Streamlit Cloud 환경에서 rdflib SPARQL 파서가 버전 조합에 따라 실패할 수 있어,
+    SPARQL 대신 triples/subjects/objects 순회 방식으로 수집한다.
     """
     cues: List[str] = []
-    # rdfs:label로 정의된 Frame 인스턴스 라벨만 수집한다.
-    # 기존처럼 모든 rdfs:label을 가져오면 ValueAnchor/Layer/RuleSchema 라벨까지
-    # frame cue로 섞여 frame_effect가 과대 계산될 수 있다.
-    q = """
-        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-        PREFIX cs: <http://www.context-sync.com/ontology/news-app#>
-        SELECT ?label WHERE {
-            ?f rdf:type cs:Frame .
-            ?f rdfs:label ?label .
-        }
-    """
+    NS = rdflib.Namespace("http://www.context-sync.com/ontology/news-app#")
+    RDF = rdflib.RDF
+    RDFS = rdflib.RDFS
     try:
-        for row in g.query(q):
-            label = str(row.label).strip()
-            if label:
-                cues.append(label)
+        for frame_uri in g.subjects(RDF.type, NS.Frame):
+            for label in g.objects(frame_uri, RDFS.label):
+                label_s = str(label).strip()
+                if label_s:
+                    cues.append(label_s)
     except Exception:
-        pass
-    # 개별 토큰으로 분해(공백/언더스코어 기준)
+        return []
     tokens: List[str] = []
     for c in cues:
         tokens.extend(t for t in re.split(r"[\s_]+", c) if len(t) >= 2)
-    return list(dict.fromkeys(tokens))  # 순서 유지 중복 제거
-
+    return list(dict.fromkeys(tokens))
 
 def extract_formula_weights(formula: str | None) -> Dict[str, float]:
     if not formula:
@@ -204,11 +434,33 @@ def extract_formula_weights(formula: str | None) -> Dict[str, float]:
 
 
 def determine_verdict(score: float, thresholds: Dict[str, Any]) -> str:
-    if score >= float(thresholds.get("deviated_min", 65)):
-        return "기준 이탈"
-    if score >= float(thresholds.get("caution_min", 35)):
+    """Distortion score(0~100, 높을수록 왜곡 큼)를 5단계 verdict로 변환한다.
+
+    v1.2.5부터 3단계 신호등 모델을 5단계 농도 모델로 확장한다.
+    내부 계산은 distortion 기준을 사용하고, UI/README에서는
+    coherence_score = 100 - distortion 기준으로 직관적으로 설명한다.
+
+    기본 distortion bands:
+      0~15   안정적 정합
+      16~30  기준 부합
+      31~45  주의 필요
+      46~60  중점 검토 필요
+      61~100 기준 이탈
+    """
+    stable_max = float(thresholds.get("stable_aligned_max", 15))
+    aligned_max = float(thresholds.get("aligned_max", 30))
+    caution_max = float(thresholds.get("caution_max", 45))
+    high_caution_max = float(thresholds.get("high_caution_max", 60))
+
+    if score <= stable_max:
+        return "안정적 정합"
+    if score <= aligned_max:
+        return "기준 부합"
+    if score <= caution_max:
         return "주의 필요"
-    return "기준 부합"
+    if score <= high_caution_max:
+        return "중점 검토 필요"
+    return "기준 이탈"
 
 
 def analyze_articles(
@@ -235,14 +487,15 @@ def analyze_articles(
         item["_idx"] = idx
         item["_date"] = parse_date(article.get("date") or article.get("published_at"))
         item["_text"] = text_of(article)
-        item["_sentiment"] = sentiment_score(item["_text"])
-        item["_frame_hits"] = count_hits(item["_text"], effective_frame_cues)
-        item["_omission_hits"] = count_hits(item["_text"], OMISSION_CUES)
-        item["_context_expl_hits"] = count_hits(item["_text"], CONTEXT_EXPLANATION_CUES)
-        item["_consensus_hits"] = count_hits(item["_text"], CONSENSUS_CUES)
+        # [v1.2.6] 제목/부제/본문 cue 가중치 반영
+        item["_sentiment"] = weighted_sentiment_score_article(article)
+        item["_frame_hits"] = weighted_count_hits_article(article, effective_frame_cues)
+        item["_omission_hits"] = weighted_count_hits_article(article, OMISSION_CUES)
+        item["_context_expl_hits"] = weighted_count_hits_article(article, CONTEXT_EXPLANATION_CUES)
+        item["_consensus_hits"] = weighted_count_hits_article(article, CONSENSUS_CUES)
         # [v1.2.2] evidence_quality: 증거 부재 cues − 증거 충실 cues
-        item["_evidence_lack_hits"] = count_hits(item["_text"], EVIDENCE_LACK_CUES)
-        item["_evidence_present_hits"] = count_hits(item["_text"], EVIDENCE_PRESENT_CUES)
+        item["_evidence_lack_hits"] = weighted_count_hits_article(article, EVIDENCE_LACK_CUES)
+        item["_evidence_present_hits"] = weighted_count_hits_article(article, EVIDENCE_PRESENT_CUES)
         normalized.append(item)
 
     if not normalized:
@@ -313,12 +566,13 @@ def analyze_articles(
                 "outlet": a.get("outlet", ""),
                 "topic": a.get("topic", ""),
                 "title": a.get("title", ""),
+                "subtitle": a.get("subtitle") or a.get("summary") or "",
                 "sentiment": round(a["_sentiment"], 3),
-                "frame_hits": a["_frame_hits"],
-                "omission_hits": a["_omission_hits"],
-                "context_expl_hits": a["_context_expl_hits"],
-                "evidence_lack_hits": a["_evidence_lack_hits"],
-                "evidence_present_hits": a["_evidence_present_hits"],
+                "frame_hits": round(a["_frame_hits"], 2),
+                "omission_hits": round(a["_omission_hits"], 2),
+                "context_expl_hits": round(a["_context_expl_hits"], 2),
+                "evidence_lack_hits": round(a["_evidence_lack_hits"], 2),
+                "evidence_present_hits": round(a["_evidence_present_hits"], 2),
             }
         )
 
@@ -387,63 +641,34 @@ OWL_NS = "http://www.context-sync.com/ontology/news-app#"
 def check_value_frame_conflict(graph: Optional[rdflib.Graph], value: str, frame: str) -> bool:
     """OWL의 conflictsWith 관계로 ValueAnchor와 Frame이 구조적으로 충돌하는지 검사.
 
-    시계열 정합성 검증의 핵심: 과거 텍스트가 옹호한 Value를
-    현재 텍스트의 Frame이 위반하는지를 그래프에서 직접 추론.
+    Cloud 안정성을 위해 SPARQL ASK 대신 직접 triple lookup을 사용한다.
     """
-    if graph is None or not value or not frame or frame in ("None", ""):
+    if graph is None or not value or not frame or frame == "None":
         return False
-    q = f"""
-    PREFIX cs: <{OWL_NS}>
-    ASK {{ cs:val_{value} cs:conflictsWith cs:frame_{frame} . }}
-    """
-    try:
-        return bool(graph.query(q).askAnswer)
-    except Exception:
-        return False
-
+    NS = rdflib.Namespace("http://www.context-sync.com/ontology/news-app#")
+    return (NS[f"val_{value}"], NS.conflictsWith, NS[f"frame_{frame}"]) in graph
 
 def check_value_reinforces(graph: Optional[rdflib.Graph], value_a: str, value_b: str) -> bool:
-    """OWL의 reinforces 관계로 두 ValueAnchor가 강화 관계인지 검사.
-
-    True면 value_a → value_b 이동은 *강조점 이동*이지 구조 충돌이 아님.
-    """
+    """OWL의 reinforces 관계로 두 ValueAnchor가 강화 관계인지 검사. 양방향을 허용한다."""
     if graph is None or not value_a or not value_b or value_a == value_b:
         return False
-    q = f"""
-    PREFIX cs: <{OWL_NS}>
-    ASK {{
-        {{ cs:val_{value_a} cs:reinforces cs:val_{value_b} . }}
-        UNION
-        {{ cs:val_{value_b} cs:reinforces cs:val_{value_a} . }}
-    }}
-    """
-    try:
-        return bool(graph.query(q).askAnswer)
-    except Exception:
-        return False
-
+    NS = rdflib.Namespace("http://www.context-sync.com/ontology/news-app#")
+    a = NS[f"val_{value_a}"]
+    b = NS[f"val_{value_b}"]
+    return ((a, NS.reinforces, b) in graph) or ((b, NS.reinforces, a) in graph)
 
 def get_calibrated_dimensions(graph: Optional[rdflib.Graph], value: str) -> List[str]:
-    """OWL calibratesDimension 관계로 ValueAnchor가 보정하는 평가 차원 조회.
-
-    *Value 위반이 어느 점수 차원으로 반영되어야 하는가*를 그래프에서 추론.
-    """
+    """OWL calibratesDimension 관계로 ValueAnchor가 보정하는 평가 차원 조회."""
     if graph is None or not value:
         return []
-    q = f"""
-    PREFIX cs: <{OWL_NS}>
-    SELECT ?dim WHERE {{ cs:val_{value} cs:calibratesDimension ?dim . }}
-    """
-    try:
-        dims = []
-        for row in graph.query(q):
-            iri = str(row.dim)
-            if "#dim_" in iri:
-                dims.append(iri.split("#dim_")[-1])
-        return dims
-    except Exception:
-        return []
-
+    NS = rdflib.Namespace("http://www.context-sync.com/ontology/news-app#")
+    dims: List[str] = []
+    for dim_uri in graph.objects(NS[f"val_{value}"], NS.calibratesDimension):
+        iri = str(dim_uri)
+        dim = iri.split("#dim_", 1)[1] if "#dim_" in iri else iri.rsplit("/", 1)[-1].replace("dim_", "")
+        if dim in DIMENSIONS and dim not in dims:
+            dims.append(dim)
+    return dims
 
 def compute_graph_penalty(
     base_abs: float,
@@ -529,6 +754,99 @@ def heuristic_extract_symbol(
     }
 
 
+
+def _signed_soft_cap(total_penalty: float, cap: float) -> float:
+    """부호를 보존해 frame-level raw sum에 절댓값 상한을 적용한다."""
+    total = float(total_penalty or 0.0)
+    cap_value = max(0.0, float(cap or 0.0))
+    if total < 0:
+        return -min(abs(total), cap_value)
+    return min(total, cap_value)
+
+
+def apply_frame_soft_caps(
+    fired_rules: List[Dict[str, Any]],
+    frame_caps: Optional[Dict[str, float]] = None,
+    default_cap: float = DEFAULT_FRAME_SOFT_CAP,
+    explanation_sensitive_frames: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    """동일 프레임 룰 다발 발화의 점수 폭주를 막는 중간 집계층.
+
+    원칙:
+    - fired_rules는 근거 추적용으로 모두 보존한다.
+    - 실제 score 반영은 (target_frame, dimension) 단위의 capped_penalty만 사용한다.
+    - 같은 프레임의 룰 10개 발화는 "10개 독립 위반"이라기보다
+      "해당 프레임이 강하게 감지됨"으로 해석한다.
+    - explanation-sensitive frame은 effective_frame_cap = base_frame_cap × mitigation_factor를 적용한다.
+      충분한 설명(strong=0.50)은 부가 프레임 페널티의 최대치 자체를 낮춘다.
+    """
+    caps = frame_caps or FRAME_SOFT_CAPS
+    sensitive = explanation_sensitive_frames or EXPLANATION_SENSITIVE_FRAMES
+    buckets: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for rule in fired_rules:
+        penalty = float(rule.get("axiom_penalty", 0) or 0)
+        if penalty == 0:
+            continue
+        frame = str(rule.get("target_frame") or "Unknown")
+        dim = str(rule.get("dimension") or "unknown")
+        buckets[(frame, dim)].append(rule)
+
+    groups: List[Dict[str, Any]] = []
+    for (frame, dim), rules in buckets.items():
+        raw_sum = round(sum(float(r.get("axiom_penalty", 0) or 0) for r in rules), 1)
+        base_cap = float(caps.get(frame, default_cap))
+        mitigation_factors = [float(r.get("explanation_mitigation_factor", 1.0) or 1.0) for r in rules]
+        # 보수적 집계: factor가 낮을수록 강한 완화이므로, 여러 룰이 섞이면 가장 덜 관대한 factor(max)를 사용한다.
+        group_factor = max(mitigation_factors) if mitigation_factors else 1.0
+        if frame in sensitive:
+            effective_cap = round(base_cap * group_factor, 2)
+        else:
+            effective_cap = base_cap
+            group_factor = 1.0
+        applied = round(_signed_soft_cap(raw_sum, effective_cap), 1)
+        representative = max(
+            rules,
+            key=lambda r: abs(float(r.get("axiom_penalty", 0) or 0)),
+        )
+        rule_ids = [str(r.get("rule_id", "?")) for r in rules]
+        groups.append({
+            "target_frame": frame,
+            "dimension": dim,
+            "rule_count": len(rules),
+            "rule_ids": rule_ids,
+            "representative_rule_id": representative.get("rule_id"),
+            "representative_schema_id": representative.get("schema_id"),
+            "raw_rule_sum": raw_sum,
+            "base_frame_soft_cap": base_cap,
+            "cap_mitigation_factor": group_factor,
+            "effective_frame_cap": effective_cap,
+            # Backward-compatible alias for older UI code; in v2.1.8 this means effective cap.
+            "frame_soft_cap": effective_cap,
+            "capped_penalty": applied,
+            "suppressed_penalty": round(raw_sum - applied, 1),
+            "frame_definition_ko": representative.get("frame_definition_ko", ""),
+            "schema_description_ko": representative.get("schema_description_ko", ""),
+        })
+
+    groups.sort(key=lambda g: (abs(float(g.get("capped_penalty", 0) or 0)), g.get("rule_count", 0)), reverse=True)
+    return groups
+
+
+def compute_frame_capped_dimension_breakdown(
+    matched_rules: List[Dict[str, Any]],
+    base_breakdown: Optional[Dict[str, float]] = None,
+) -> Tuple[Dict[str, float], List[Dict[str, Any]]]:
+    """matched/fired rule 목록을 frame soft cap 적용 후 dimension_breakdown으로 변환."""
+    breakdown = {d: float((base_breakdown or {}).get(d, 0.0)) for d in DIMENSIONS}
+    fired = [r for r in matched_rules if abs(float(r.get("axiom_penalty", 0) or 0)) > 0]
+    groups = apply_frame_soft_caps(fired)
+    for group in groups:
+        dim = group.get("dimension")
+        penalty = float(group.get("capped_penalty", 0) or 0)
+        if dim in breakdown:
+            breakdown[dim] += penalty
+    return {d: round(v, 1) for d, v in breakdown.items()}, groups
+
 # ─────────────────────────────────────
 # audit_temporal_pair: axiom audit_logic의 N-묶음 적응판
 # ─────────────────────────────────────
@@ -573,6 +891,7 @@ def audit_temporal_pair(
         "score": 100,
         "reasons": [],
         "fired_rules": [],
+        "frame_penalty_groups": [],
         "trace_events": [],
         "dimension_breakdown": {d: 0.0 for d in DIMENSIONS},
         "details": {"past": past, "present": present},
@@ -609,6 +928,21 @@ def audit_temporal_pair(
             "detail": detail,
             "rule_ids": rule_ids or [],
         })
+
+    # ─── Stage 0: Validity / Ethics Red Card ───
+    # 최소 사실/윤리 기준 위반은 시계열 정합성 계산보다 우선한다.
+    pair_red_card = detect_validity_red_card("\n".join([past_text or "", present_text or ""]))
+    if pair_red_card.get("violation"):
+        report["validity_violation"] = True
+        report["validity_score"] = -100
+        report["logic_conflict"] = True
+        report["weighted_distortion"] = 100.0
+        report["score"] = 0.0
+        report["anchor_verdict"] = "기준 이탈"
+        report["details"]["validity_red_card"] = pair_red_card
+        report["reasons"].append(pair_red_card.get("reason", "Stage 0 validity red-card"))
+        report["trace_events"].extend(build_validity_trace(pair_red_card))
+        return report
 
     # [v1.2.4] Explanation mitigation signal
     # Δ 자체는 그대로 유지하되, 설명 충실도는 Stage 3/4의 부가 penalty 완화에 사용한다.
@@ -800,7 +1134,11 @@ def audit_temporal_pair(
         if frame_matched:
             matched = frame_matched
 
-    explanation_sensitive_frames = {"SilentPivot", "RetroactiveReframing", "SelectiveMemory", "ContextOmission"}
+    explanation_sensitive_frames = EXPLANATION_SENSITIVE_FRAMES
+
+    # [v2.1.8] Rule-level evidence는 모두 보존하되, score-level penalty는
+    # (target_frame, dimension) frame bucket별 soft cap을 적용한 뒤 dimension_breakdown에 반영한다.
+    stage4_rules: List[Dict[str, Any]] = []
     for r in matched:
         penalty = float(r.get("axiom_penalty", 0))
         if penalty == 0:
@@ -815,15 +1153,24 @@ def audit_temporal_pair(
             r["raw_axiom_penalty"] = raw_penalty
             r["axiom_penalty"] = penalty
             r["explanation_mitigation_factor"] = explanation_mitigation.get("mitigation_factor", 1.0)
+        stage4_rules.append(r)
+
+    frame_groups = apply_frame_soft_caps(stage4_rules)
+    report["frame_penalty_groups"] = frame_groups
+    report["fired_rules"] = stage4_rules
+
+    for group in frame_groups:
+        penalty = float(group.get("capped_penalty", 0) or 0)
+        rule_dim = group.get("dimension")
         report["logic_score"] += penalty
-        rule_dim = r.get("dimension")
         if rule_dim in report["dimension_breakdown"]:
             report["dimension_breakdown"][rule_dim] += penalty
         else:
-            rule_value = r.get("value_anchor", "")
+            # 현재 match_rules는 DIMENSIONS 안의 dimension만 반환하지만, 혹시 모를 확장을 위해 보존.
+            representative_rule = next((r for r in stage4_rules if r.get("rule_id") == group.get("representative_rule_id")), None)
+            rule_value = (representative_rule or {}).get("value_anchor", "")
             if rule_value:
                 _distribute(rule_value, penalty)
-        report["fired_rules"].append(r)
 
     if report["fired_rules"]:
         rule_ids = [r["rule_id"] for r in report["fired_rules"]]
@@ -832,28 +1179,23 @@ def audit_temporal_pair(
             f"{'...' if len(rule_ids) > 5 else ''}"
         )
 
-        # Stage 4 trace는 룰마다 한 줄씩 늘리면 시연 가독성이 떨어지므로
-        # (target_frame, schema_id, dimension) 단위로 그룹 요약한다.
-        grouped_rules: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
-        for rule in report["fired_rules"]:
-            key = (
-                str(rule.get("target_frame", "?")),
-                str(rule.get("schema_id", "?")),
-                str(rule.get("dimension", "?")),
-            )
-            grouped_rules[key].append(rule)
-        for (frame, schema, dim), grp in grouped_rules.items():
-            total_penalty = sum(float(rule.get("axiom_penalty", 0) or 0) for rule in grp)
-            grp_ids = [str(rule.get("rule_id", "?")) for rule in grp]
-            detail = grp[0].get("frame_definition_ko", "") or grp[0].get("schema_description_ko", "")
+        # Stage 4 trace는 실제 점수 반영 단위인 frame_penalty_groups 기준으로 요약한다.
+        for group in report.get("frame_penalty_groups", []):
+            frame = str(group.get("target_frame", "?"))
+            dim = str(group.get("dimension", "?"))
+            grp_ids = [str(x) for x in group.get("rule_ids", [])]
+            detail = group.get("frame_definition_ko", "") or group.get("schema_description_ko", "")
+            raw_sum = float(group.get("raw_rule_sum", 0) or 0)
+            applied = float(group.get("capped_penalty", 0) or 0)
+            cap = float(group.get("frame_soft_cap", 0) or 0)
             _append_trace(
-                "Stage 4: Rule",
-                f"frame={frame} / schema={schema} ({len(grp)}개 룰)",
-                "dimension (JSON 우선)",
+                "Stage 4: Rule frame-cap",
+                f"frame={frame} ({group.get('rule_count', 0)}개 룰)",
+                "frame_soft_cap → dimension",
                 dim,
-                total_penalty,
-                f"rules:[{', '.join(grp_ids[:5])}{'...' if len(grp_ids) > 5 else ''}]",
-                detail[:120] if detail else "1024 JSON 룰셋 발화",
+                applied,
+                f"raw_sum={raw_sum:.1f}, cap={cap:.1f}, rules:[{', '.join(grp_ids[:5])}{'...' if len(grp_ids) > 5 else ''}]",
+                detail[:120] if detail else "1024 JSON 룰셋 발화 — 동일 프레임 룰 다발은 capped_penalty만 점수 반영",
                 rule_ids=grp_ids,
             )
 
@@ -869,16 +1211,9 @@ def audit_temporal_pair(
     report["weighted_distortion"] = weighted_distortion
     report["dimension_weights"] = weights
 
-    # 판정
+    # 판정 — v1.2.5 5단계 verdict 체계
     thresholds = rules_data.get("verdict_thresholds", {})
-    aligned_max = float(thresholds.get("aligned_max", 34))
-    caution_max = float(thresholds.get("caution_max", 64))
-    if weighted_distortion <= aligned_max:
-        report["anchor_verdict"] = "기준 부합"
-    elif weighted_distortion <= caution_max:
-        report["anchor_verdict"] = "주의 필요"
-    else:
-        report["anchor_verdict"] = "기준 이탈"
+    report["anchor_verdict"] = determine_verdict_axiom(weighted_distortion, thresholds)
 
     # 안전망 경고
     dim_total = sum(abs(v) for v in report["dimension_breakdown"].values())
@@ -929,7 +1264,7 @@ def audit_article_group(
 
 
 # ═══════════════════════════════════════════════════════════════
-# [v1.2.2 axiom 흡수] #2 compute_weighted_distortion (per_dim_cap=45 정규화)
+# [v2.1.7] #2 compute_weighted_distortion (per_dim_cap=45 정규화 + frame soft cap 전제)
 # ═══════════════════════════════════════════════════════════════
 
 def compute_weighted_distortion(
@@ -941,11 +1276,13 @@ def compute_weighted_distortion(
 
     JSON normalization_note_ko의 권고를 반영:
       1. 각 차원의 누적 페널티 절댓값을 0~100 스케일로 정규화
-         (per_dim_cap=45 상한 클리핑 — 한 차원에 45점 이상 누적 시 100% 왜곡)
+         (per_dim_cap=45 baseline 상한 클리핑 — 한 차원에 45점 이상 누적 시 100% 왜곡)
       2. 정규화된 차원 점수 × 가중치 → 가중 합산
       3. 최종 0~100 클리핑
 
-    *룰 발화 수에 따른 과대평가 방지*가 핵심. 한 차원 폭주가 다른 차원을 지배 못함.
+    per_dim_cap은 한 차원이 최종 weighted_distortion을 과도하게 지배하지 않도록
+    dimension-level 기여도를 제한한다. 동일 프레임의 다중 룰 발화로 raw_penalty가
+    cap을 크게 초과하는 문제는 Stage 4의 frame-level soft cap에서 먼저 보정한다.
     """
     if not weights:
         return 0.0
@@ -1162,21 +1499,14 @@ def match_rules(
 def compute_rule_dimension_breakdown(
     matched_rules: List[Dict[str, Any]],
 ) -> Dict[str, float]:
-    """fired rules의 axiom_penalty를 dimension별로 누적한다.
+    """fired rules를 frame-level soft cap 적용 후 dimension별로 누적한다.
 
-    [v1.2.2 axiom 흡수]
-      각 룰의 dimension 필드에 axiom_penalty 누적 → dimension_breakdown 생성.
-      이 결과를 compute_weighted_distortion에 넣으면 정규화된 5차원 가중 점수 산출.
+    fired_rules 목록은 근거 추적용으로 유지하되, 점수화에서는 동일 프레임 룰 다발을
+    모두 독립 위반으로 보지 않는다. 실제 반영값은 apply_frame_soft_caps()의
+    capped_penalty를 사용한다.
     """
-    breakdown = {d: 0.0 for d in DIMENSIONS}
-    for r in matched_rules:
-        penalty = float(r.get("axiom_penalty", 0) or 0)
-        if penalty == 0:
-            continue
-        dim = r.get("dimension")
-        if dim in breakdown:
-            breakdown[dim] += penalty
-    return {d: round(v, 1) for d, v in breakdown.items()}
+    breakdown, _groups = compute_frame_capped_dimension_breakdown(matched_rules)
+    return breakdown
 
 
 def summarize_rules(rules: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1193,98 +1523,93 @@ def summarize_rules(rules: List[Dict[str, Any]]) -> Dict[str, Any]:
 def build_owl_mermaid(g: rdflib.Graph) -> str:
     """OWL 그래프에서 Layer → Value → Frame → RuleSchema 계층을 Mermaid flowchart로 생성한다.
 
-    추가 패키지 없이 st.markdown으로 렌더링할 수 있다.
+    Streamlit Community Cloud에서 rdflib SPARQL query가 환경에 따라 실패할 수 있으므로
+    SPARQL 없이 triples/subjects/objects 순회만 사용한다.
     """
-    NS = "http://www.context-sync.com/ontology/news-app#"
+    NS = rdflib.Namespace("http://www.context-sync.com/ontology/news-app#")
+    OWL_NS = "http://www.w3.org/2002/07/owl#"
+    RDF = rdflib.RDF
+    RDFS = rdflib.RDFS
 
-    def short(uri: str) -> str:
-        return str(uri).replace(NS, "").replace("http://www.w3.org/2002/07/owl#", "owl:")
+    def short(uri: Any) -> str:
+        return str(uri).replace(str(NS), "").replace(OWL_NS, "owl:")
 
-    # ── SPARQL로 주요 엔티티와 관계 수집 ───────────────────────────
-    layers, values, frames, schemas = [], [], [], []
-    edges = []
+    def label_of(uri: Any) -> str:
+        labels = list(g.objects(uri, RDFS.label))
+        return str(labels[0]).strip() if labels else short(uri)
 
-    # AxiomLayer 인스턴스
-    for row in g.query(f"SELECT ?s ?label WHERE {{ ?s a <{NS}AxiomLayer> . OPTIONAL {{ ?s <http://www.w3.org/2000/01/rdf-schema#label> ?label }} }}"):
-        sid = short(row.s)
-        label = str(row.label or sid).strip()
-        layers.append((sid, label))
+    def unique_append(items: List[Tuple[str, str]], item: Tuple[str, str]) -> None:
+        if item not in items:
+            items.append(item)
 
-    # ValueAnchor 인스턴스 + belongsToLayer
-    for row in g.query(f"SELECT ?s ?label ?layer WHERE {{ ?s a <{NS}ValueAnchor> . OPTIONAL {{ ?s <http://www.w3.org/2000/01/rdf-schema#label> ?label }} . OPTIONAL {{ ?s <{NS}belongsToLayer> ?layer }} }}"):
-        sid = short(row.s)
-        label = str(row.label or sid).strip()
-        values.append((sid, label))
-        if row.layer:
-            edges.append((short(row.layer), sid))
+    layers: List[Tuple[str, str]] = []
+    values: List[Tuple[str, str]] = []
+    frames: List[Tuple[str, str]] = []
+    schemas: List[Tuple[str, str]] = []
+    edges: List[Tuple[str, str]] = []
 
-    # Frame 인스턴스
-    for row in g.query(f"SELECT ?s ?label WHERE {{ ?s a <{NS}Frame> . OPTIONAL {{ ?s <http://www.w3.org/2000/01/rdf-schema#label> ?label }} }}"):
-        sid = short(row.s)
-        label = str(row.label or sid).strip()
-        frames.append((sid, label))
+    for s in g.subjects(RDF.type, NS.AxiomLayer):
+        unique_append(layers, (short(s), label_of(s)))
+    for s in g.subjects(RDF.type, NS.ValueAnchor):
+        sid = short(s)
+        unique_append(values, (sid, label_of(s)))
+        for layer in g.objects(s, NS.belongsToLayer):
+            edges.append((short(layer), sid))
+    for s in g.subjects(RDF.type, NS.Frame):
+        unique_append(frames, (short(s), label_of(s)))
 
-    # RuleSchema 인스턴스 + constrainsFrame + anchoredByValue + belongsToLayer
-    q = f"""
-    SELECT ?s ?label ?frame ?value ?layer WHERE {{
-        ?s a ?type .
-        FILTER(?type IN (<{NS}TemporalRuleSchema>, <{NS}StructuralRuleSchema>, <{NS}MetacognitiveRuleSchema>))
-        OPTIONAL {{ ?s <http://www.w3.org/2000/01/rdf-schema#label> ?label }}
-        OPTIONAL {{ ?s <{NS}constrainsFrame> ?frame }}
-        OPTIONAL {{ ?s <{NS}anchoredByValue> ?value }}
-        OPTIONAL {{ ?s <{NS}belongsToLayer> ?layer }}
-    }}
-    """
-    for row in g.query(q):
-        sid = short(row.s)
-        label = str(row.label or sid).strip()
-        schemas.append((sid, label))
-        if row.frame:
-            edges.append((sid, short(row.frame)))
-        if row.value:
-            edges.append((short(row.value), sid))
-        if row.layer:
-            edges.append((short(row.layer), sid))
+    schema_types = [NS.TemporalRuleSchema, NS.StructuralRuleSchema, NS.MetacognitiveRuleSchema]
+    seen_schema = set()
+    for schema_type in schema_types:
+        for s in g.subjects(RDF.type, schema_type):
+            if s in seen_schema:
+                continue
+            seen_schema.add(s)
+            sid = short(s)
+            unique_append(schemas, (sid, label_of(s)))
+            for frame in g.objects(s, NS.constrainsFrame):
+                edges.append((sid, short(frame)))
+            for value in g.objects(s, NS.anchoredByValue):
+                edges.append((short(value), sid))
+            for layer in g.objects(s, NS.belongsToLayer):
+                edges.append((short(layer), sid))
 
-    # ── Mermaid 코드 생성 ─────────────────────────────────────────
     lines = ["flowchart TD"]
-
-    # 스타일 클래스
     lines.append('    classDef layerStyle fill:#4a90d9,color:#fff,stroke:#2c5f8a')
     lines.append('    classDef valueStyle fill:#50c878,color:#fff,stroke:#2d8a4e')
     lines.append('    classDef frameStyle fill:#f5a623,color:#fff,stroke:#c17d12')
     lines.append('    classDef schemaStyle fill:#9b59b6,color:#fff,stroke:#6c3483')
 
     def safe_id(s: str) -> str:
-        return s.replace("-", "_").replace(".", "_")
+        return re.sub(r"[^0-9A-Za-z_가-힣]", "_", str(s))
 
-    # 노드 선언
+    def safe_label(s: str) -> str:
+        return str(s).replace('"', "'").replace("\n", " ")[:80]
+
     for sid, label in layers:
-        lines.append(f'    {safe_id(sid)}["{label}"]:::layerStyle')
+        lines.append(f'    {safe_id(sid)}["{safe_label(label)}"]:::layerStyle')
     for sid, label in values:
-        lines.append(f'    {safe_id(sid)}["{label}"]:::valueStyle')
-    for sid, label in frames[:15]:  # 프레임 수 제한 (시각성)
-        lines.append(f'    {safe_id(sid)}["{label}"]:::frameStyle')
-    for sid, label in schemas[:12]:  # 스키마 수 제한
-        lines.append(f'    {safe_id(sid)}["{label}"]:::schemaStyle')
+        lines.append(f'    {safe_id(sid)}["{safe_label(label)}"]:::valueStyle')
+    for sid, label in frames[:15]:
+        lines.append(f'    {safe_id(sid)}["{safe_label(label)}"]:::frameStyle')
+    for sid, label in schemas[:12]:
+        lines.append(f'    {safe_id(sid)}["{safe_label(label)}"]:::schemaStyle')
 
-    # 에지
     visible_nodes = {safe_id(s) for s, _ in layers + values + frames[:15] + schemas[:12]}
+    seen_edges = set()
     for src, dst in edges:
         s, d = safe_id(src), safe_id(dst)
-        if s in visible_nodes and d in visible_nodes:
-            lines.append(f'    {s} --> {d}')
+        if s in visible_nodes and d in visible_nodes and (s, d) not in seen_edges:
+            lines.append(f"    {s} --> {d}")
+            seen_edges.add((s, d))
 
-    # 범례
     lines.append('    subgraph legend["범례"]')
     lines.append('        L["AxiomLayer"]:::layerStyle')
     lines.append('        V["ValueAnchor"]:::valueStyle')
     lines.append('        F["Frame"]:::frameStyle')
     lines.append('        S["RuleSchema"]:::schemaStyle')
     lines.append('    end')
-
     return "\n".join(lines)
-
 
 def build_verdict_reason(matched: List[Dict[str, Any]]) -> str:
     """트리거된 상위 규칙에서 판정 핵심 근거 1~2문장을 생성한다.
@@ -1554,6 +1879,59 @@ def analyze_pipeline(
     v1_verdict = determine_verdict(v1_distortion, rules_data.get("verdict_thresholds", {}))
 
     # ─────────────────────────────────────
+    # Stage 0 validity red-card: 5차원 점수보다 우선하는 상위 자격 심사
+    # ─────────────────────────────────────
+    red_card = scan_articles_validity_red_card(articles)
+    if red_card.get("violation"):
+        zero_breakdown = {d: 0.0 for d in DIMENSIONS}
+        validity_trace = build_validity_trace(red_card)
+        verdict_reason = red_card.get("reason", "Stage 0 validity red-card")
+        return {
+            "features": features,
+            "weights": weights,
+
+            # v1 compatibility + 명시적 alias
+            "score": v1_distortion,
+            "verdict": v1_verdict,
+            "v1_distortion_score": v1_distortion,
+            "v1_verdict": v1_verdict,
+
+            # red-card override
+            "validity_violation": True,
+            "validity_red_card": red_card,
+            "validity_trace": validity_trace,
+            "validity_score": -100,
+
+            "matched_rules": [],
+            "candidate_rules": [],
+            "axiom_fired_rules": [],
+            "axiom_frame_penalty_groups": [],
+            "verdict_reason": verdict_reason,
+
+            "article_rows": extraction["article_rows"],
+            "series": extraction["series"],
+            "rule_summary": summarize_rules(rules_data.get("rules", [])),
+
+            "axiom_lite_distortion": 100.0,
+            "axiom_lite_score": 0.0,
+            "axiom_lite_verdict": "기준 이탈 (validity red-card)",
+            "axiom_lite_dimension_breakdown": zero_breakdown,
+
+            "axiom_source": "validity_red_card",
+            "primary_group_key": "-",
+            "graph_audits": [],
+            "primary_graph_audit": None,
+            "polarity_shift": 0.0,
+            "polarity_shift_label": "Skipped by validity red-card",
+            "temporal_penalty": 0.0,
+            "dimension_breakdown": zero_breakdown,
+            "axiom_distortion": 100.0,
+            "coherence_score": 0.0,
+            "axiom_score": 0.0,
+            "axiom_verdict": "기준 이탈 (validity red-card)",
+        }
+
+    # ─────────────────────────────────────
     # axiom-lite fallback: graph audit이 불가능할 때만 메인으로 사용
     # ─────────────────────────────────────
     polarity_shift = float(features.get("temporal_shift", 0)) / 100.0 * 1.25
@@ -1566,7 +1944,7 @@ def analyze_pipeline(
         polarity_shift=polarity_shift,
         has_logic_conflict=(polarity_shift >= 1.0),
     )
-    lite_breakdown = compute_rule_dimension_breakdown(candidate_rules)
+    lite_breakdown, lite_frame_penalty_groups = compute_frame_capped_dimension_breakdown(candidate_rules)
     temporal_penalty = compute_temporal_shift_penalty(polarity_shift)
     lite_breakdown["temporal_shift"] = round(
         lite_breakdown.get("temporal_shift", 0) + temporal_penalty, 1
@@ -1590,6 +1968,7 @@ def analyze_pipeline(
         axiom_verdict = primary_graph_audit.get("anchor_verdict", determine_verdict_axiom(axiom_distortion, rules_data.get("verdict_thresholds", {})))
         dimension_breakdown = primary_graph_audit.get("dimension_breakdown", {d: 0.0 for d in DIMENSIONS})
         axiom_fired_rules = primary_graph_audit.get("fired_rules", [])
+        axiom_frame_penalty_groups = primary_graph_audit.get("frame_penalty_groups", [])
         graph_past = primary_graph_audit.get("details", {}).get("past", {})
         graph_present = primary_graph_audit.get("details", {}).get("present", {})
         graph_polarity_shift = abs(float(graph_past.get("stance_polarity", 0) or 0) - float(graph_present.get("stance_polarity", 0) or 0))
@@ -1604,6 +1983,7 @@ def analyze_pipeline(
         axiom_verdict = axiom_lite_verdict
         dimension_breakdown = lite_breakdown
         axiom_fired_rules = [r for r in candidate_rules if r.get("is_fired")]
+        axiom_frame_penalty_groups = lite_frame_penalty_groups
         polarity_shift_for_display = polarity_shift
         temporal_penalty_for_display = temporal_penalty
         primary_group_key = "-"
@@ -1625,6 +2005,7 @@ def analyze_pipeline(
         "matched_rules": candidate_rules,
         "candidate_rules": candidate_rules,
         "axiom_fired_rules": axiom_fired_rules,
+        "axiom_frame_penalty_groups": axiom_frame_penalty_groups,
         "verdict_reason": verdict_reason,
 
         "article_rows": extraction["article_rows"],
@@ -1636,6 +2017,7 @@ def analyze_pipeline(
         "axiom_lite_score": axiom_lite_score,
         "axiom_lite_verdict": axiom_lite_verdict,
         "axiom_lite_dimension_breakdown": lite_breakdown,
+        "axiom_lite_frame_penalty_groups": lite_frame_penalty_groups,
 
         # 최종 axiom 대표값: graph audit 우선, lite fallback
         "axiom_source": axiom_source,
@@ -1653,15 +2035,9 @@ def analyze_pipeline(
     }
 
 def determine_verdict_axiom(distortion: float, thresholds: Dict[str, Any]) -> str:
-    """axiom 정규화 점수용 verdict 라벨.
+    """axiom 정규화 점수용 5단계 verdict 라벨.
 
-    distortion: 0~100 (높을수록 왜곡 큼)
-    thresholds: {"aligned_max": 34, "caution_max": 64}
+    app.py의 메트릭 제목이 이미 "최종 판정 (axiom)"을 표시하므로,
+    라벨 자체에는 (axiom) 접미사를 붙이지 않는다.
     """
-    aligned_max = float(thresholds.get("aligned_max", 34))
-    caution_max = float(thresholds.get("caution_max", 64))
-    if distortion <= aligned_max:
-        return "기준 부합 (axiom)"
-    if distortion <= caution_max:
-        return "주의 필요 (axiom)"
-    return "기준 이탈 (axiom)"
+    return determine_verdict(distortion, thresholds)

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 import pandas as pd
 import streamlit as st
@@ -19,7 +23,70 @@ from rule_engine import (
     # [v4 보강] OWL reasoning trace table
     build_reasoning_trace,
 )
-from sllm_extractor import DEFAULT_MODEL, extract_features_with_sllm, compare_rag_results
+# Cloud-friendly optional LLM/RAG imports.
+# Streamlit Community Cloud 배포판은 sentence-transformers/torch 같은 무거운 로컬 sLLM·Dense RAG 의존성을
+# 기본 requirements.txt에 포함하지 않는다. sllm_extractor가 없거나 heavy dependency 때문에 import 실패하면
+# 앱은 휴리스틱/룰 기반 모드로 계속 실행되고, 로컬 배포판에서만 선택 기능을 활성화한다.
+try:
+    from sllm_extractor import (
+        DEFAULT_MODEL,
+        extract_features_with_sllm,
+        compare_rag_results,
+        _rule_text,
+    )
+    SLLM_EXTRACTOR_AVAILABLE = True
+    SLLM_EXTRACTOR_IMPORT_ERROR = None
+except Exception as _sllm_import_error:  # pragma: no cover - deployment guard
+    DEFAULT_MODEL = "gpt-4o-mini"
+    SLLM_EXTRACTOR_AVAILABLE = False
+    SLLM_EXTRACTOR_IMPORT_ERROR = _sllm_import_error
+
+    def _rule_text(rule):
+        return " ".join(
+            str(rule.get(k, ""))
+            for k in ["rule_id", "target_frame", "llm_instruction_ko", "frame_definition_ko", "schema_description_ko"]
+            if rule.get(k)
+        )
+
+    def extract_features_with_sllm(*args, **kwargs):
+        raise RuntimeError(
+            "sllm_extractor 모듈 또는 선택 의존성이 로드되지 않았습니다. "
+            "Streamlit Cloud 배포판에서는 기본 휴리스틱/룰 기반 모드를 사용하세요. "
+            "로컬에서 LLM/sLLM 모드를 쓰려면 requirements-sllm.txt를 설치하세요."
+        )
+
+    def compare_rag_results(articles, rules_data, top_k=8, dense_model=None, rule_embeddings=None, min_sparse_score=0.001, min_dense_score=0.15):
+        # Minimal Sparse-only fallback for cloud deployments.
+        article_text = " ".join(
+            " ".join(str(a.get(k, "")) for k in ["title", "subtitle", "summary", "body", "text", "content"] if a.get(k))
+            for a in articles
+        )
+        article_tokens = set(re.findall(r"[0-9A-Za-z가-힣_]+", article_text.lower()))
+        sparse_scores = []
+        for rule in rules_data.get("rules", []):
+            rt = _rule_text(rule).lower()
+            rule_tokens = set(re.findall(r"[0-9A-Za-z가-힣_]+", rt))
+            if not rule_tokens or not article_tokens:
+                score = 0.0
+            else:
+                score = len(article_tokens & rule_tokens) / max(1, len(article_tokens | rule_tokens))
+            if score >= min_sparse_score:
+                sparse_scores.append((score, rule))
+        sparse_scores.sort(key=lambda x: x[0], reverse=True)
+        sparse_top = sparse_scores[:top_k]
+        return {
+            "sparse_available": bool(sparse_top),
+            "dense_available": False,
+            "sparse_top": sparse_top,
+            "dense_top": [],
+            "common_ids": [],
+            "sparse_only_ids": [r.get("rule_id") for _, r in sparse_top],
+            "dense_only_ids": [],
+            "min_sparse_score": min_sparse_score,
+            "min_dense_score": min_dense_score,
+            "sparse_filtered_count": len(sparse_scores),
+            "dense_filtered_count": 0,
+        }
 
 BASE_DIR = Path(__file__).resolve().parent
 ONTOLOGY_PATH = BASE_DIR / "ontology" / "context_sync_app_centered_ontology_1024.owl"
@@ -47,7 +114,6 @@ def load_dense_model():
 
 @st.cache_resource(show_spinner="규칙 벡터화 중입니다...")
 def compute_rule_embeddings(_model, rules_list):
-    from sllm_extractor import _rule_text
     return _model.encode([_rule_text(r) for r in rules_list])
 
 rules_data = cached_rules(str(RULES_PATH))
@@ -74,10 +140,14 @@ with st.sidebar:
     st.subheader("Axiom Audit Engine")
     st.write(f"**Active frames**: {len(active_frames)}개")
     st.write(f"**per_dim_cap**: {PER_DIM_CAP}  *(baseline)*")
-    with st.expander("dimension_weights (v1.2.4 baseline)"):
+    with st.expander("dimension_weights (v2.0 baseline)"):
         for d, w in weights.items():
             st.write(f"- `{d}`: {w}")
-        st.caption("OWL baseline 복귀: 0.34/0.24/0.18/0.14/0.10. 시계열 엄격 모드(0.40/cap45)는 시뮬레이터 프리셋에서 선택 가능.")
+        st.caption(
+            "OWL baseline: 0.34/0.24/0.18/0.14/0.10, per_dim_cap=45. "
+            "cap 45는 'major shift 단독(~22.7점)'과 '설명 없는 silent pivot(34점 상한 수렴)'을 점수 폭으로 분리. "
+            "시뮬레이터에서 가중치 프리셋(시계열 엄격 0.40 등)과 cap(40 sensitive / 45 default / 60 conservative)을 직접 조작 가능."
+        )
     st.caption(
         "ontology-calibrated reasoning: OWL 어휘 통제 + JSON 룰 + 5차원 정규화 "
         "+ explanation mitigation (변경 사유 충실 시 부가 페널티 부분 완화)"
@@ -87,17 +157,38 @@ with st.sidebar:
     st.code("코드 + OWL + JSON만 저장\n대용량 기사/임베딩은 repo 제외", language="text")
 
     st.divider()
-    st.subheader("LLM (GPT/sLLM) 추출기")
-    use_sllm = st.toggle("기사 지표를 LLM(GPT/sLLM)으로 추출", value=False)
-    sllm_model = st.text_input("모델명 (OpenAI GPT 또는 Hugging Face)", value=DEFAULT_MODEL, help="Hugging Face 모델명(예: Qwen/Qwen2.5-0.5B-Instruct) 또는 OpenAI GPT 모델명(예: gpt-4o)을 입력할 수 있습니다.")
-    openai_api_key = st.text_input("OpenAI API Key", type="password", help="GPT 모델 이용 시 필요합니다. 환경변수(OPENAI_API_KEY)에 설정되어 있는 경우 비워두셔도 됩니다.")
+    st.subheader("LLM 추출기 (Cloud: OpenAI 중심)")
+    cloud_mode = os.getenv("STREAMLIT_CLOUD", "1") == "1"
+    use_sllm = st.toggle(
+        "기사 지표를 LLM으로 추출",
+        value=False,
+        disabled=not SLLM_EXTRACTOR_AVAILABLE,
+        help="Cloud 배포판은 OpenAI API 중심입니다. 로컬 Hugging Face sLLM은 requirements-sllm.txt 설치 후 실행하세요.",
+    )
+    if not SLLM_EXTRACTOR_AVAILABLE:
+        st.warning("LLM 추출 모듈을 불러오지 못해 휴리스틱/룰 기반 모드로 실행합니다. 로컬 sLLM은 GitHub에서 내려받아 requirements-sllm.txt 설치 후 사용하세요.")
+    sllm_model = st.text_input(
+        "모델명",
+        value=DEFAULT_MODEL,
+        help="Streamlit Cloud에서는 OpenAI GPT 계열 사용을 권장합니다. Hugging Face 로컬 sLLM은 로컬 실행용입니다.",
+    )
+    openai_api_key = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        value=st.secrets.get("OPENAI_API_KEY", "") if hasattr(st, "secrets") else "",
+        help="GPT 모델 이용 시 필요합니다. Streamlit Cloud Secrets 또는 사이드바 입력을 사용할 수 있습니다.",
+    )
     sllm_max_tokens = st.slider("LLM max_new_tokens", 80, 500, 220)
-    st.caption("CPU 및 로컬 환경에서는 느릴 수 있습니다. GPT 모델 이용 시 API Key 설정이 필요합니다. 실패 시 휴리스틱 모드로 자동 전환됩니다.")
+    st.caption("2차 배포 기준: Cloud에서는 OpenAI API 기반 추출까지만 권장합니다. Dense RAG/sentence-transformers/로컬 sLLM은 로컬 실행 옵션입니다.")
 
     st.divider()
-    use_dense_rag = st.toggle("🚀 [Beta] 밀집 벡터(Dense) RAG 및 시각화", value=False)
-    if use_dense_rag:
-        st.caption("`jhgan/ko-sroberta-multitask` 모델을 사용하여 RAG 및 2D 시각화를 수행합니다.")
+    if cloud_mode:
+        use_dense_rag = False
+        st.info("Dense RAG / sentence-transformers 시각화는 Cloud 배포판에서 비활성화했습니다. GitHub 저장소를 내려받아 로컬에서 requirements-sllm.txt를 설치하면 사용할 수 있습니다.")
+    else:
+        use_dense_rag = st.toggle("🚀 [Local Beta] 밀집 벡터(Dense) RAG 및 시각화", value=False)
+        if use_dense_rag:
+            st.caption("`jhgan/ko-sroberta-multitask` 모델을 사용하여 RAG 및 2D 시각화를 수행합니다.")
 
     st.divider()
     top_n = st.slider("표시할 트리거 규칙 수", 3, 30, 12)
@@ -127,6 +218,167 @@ def parse_articles(raw: str):
         return [], str(e)
 
 
+
+def _meta_content(soup, *keys: str) -> str:
+    """Return the first matching meta content from property/name keys."""
+    for key in keys:
+        tag = soup.find("meta", attrs={"property": key}) or soup.find("meta", attrs={"name": key})
+        if tag and tag.get("content"):
+            return str(tag["content"]).strip()
+    return ""
+
+
+def _clean_date(value: str) -> str:
+    """Extract YYYY-MM-DD from common date strings."""
+    if not value:
+        return ""
+    m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", str(value))
+    if not m:
+        return ""
+    y, mo, d = m.groups()
+    return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+
+
+def fetch_article_from_url(url: str, topic_fallback: str = "") -> dict:
+    """기사 URL에서 title/body/outlet/date/topic을 휴리스틱으로 추출한다.
+
+    주의:
+    - 언론사 페이지 구조와 robots/차단 정책에 따라 실패할 수 있다.
+    - 실패 시 직접 입력/JSON 입력으로 보완하는 것을 전제로 한 보조 기능이다.
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except Exception as exc:
+        raise RuntimeError("URL 자동 추출에는 beautifulsoup4가 필요합니다. `pip install beautifulsoup4` 후 다시 실행하세요.") from exc
+
+    url = url.strip()
+    if not url:
+        raise ValueError("URL이 비어 있습니다.")
+    if not re.match(r"^https?://", url):
+        url = "https://" + url
+
+    req = Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; ContextSyncCurator/1.0; +https://github.com/downteam7-crypto/context-sync.curator1)"
+        },
+    )
+    with urlopen(req, timeout=15) as resp:
+        raw = resp.read()
+        content_type = resp.headers.get("Content-Type", "")
+    # 대부분의 한국어 뉴스는 utf-8 또는 euc-kr/cp949 계열이다.
+    encoding = "utf-8"
+    m = re.search(r"charset=([\w\-]+)", content_type, re.IGNORECASE)
+    if m:
+        encoding = m.group(1)
+    try:
+        html_text = raw.decode(encoding, errors="replace")
+    except Exception:
+        html_text = raw.decode("utf-8", errors="replace")
+
+    soup = BeautifulSoup(html_text, "html.parser")
+
+    # Title
+    title = _meta_content(soup, "og:title", "twitter:title")
+    if not title and soup.find("title"):
+        title = soup.find("title").get_text(" ", strip=True)
+    for sep in [" - ", " | ", " : "]:
+        if sep in title and len(title.split(sep)[0].strip()) >= 4:
+            title = title.split(sep)[0].strip()
+
+    # Subtitle / lead / summary
+    subtitle = _meta_content(soup, "og:description", "twitter:description", "description", "article:tag")
+    if not subtitle:
+        for sel in ["h2", ".subtitle", ".sub_title", ".summary", ".lead", ".article_summary", ".news_summary"]:
+            node = soup.select_one(sel)
+            if node:
+                subtitle = node.get_text(" ", strip=True)
+                if subtitle:
+                    break
+    subtitle = re.sub(r"\s+", " ", subtitle).strip()
+
+    # Outlet
+    outlet = _meta_content(soup, "og:site_name", "application-name")
+    if not outlet:
+        domain = urlparse(url).netloc.replace("www.", "")
+        outlet = "네이버뉴스" if "naver.com" in domain else ("다음뉴스" if "daum.net" in domain else domain)
+
+    # Date
+    date_str = _clean_date(
+        _meta_content(
+            soup,
+            "article:published_time",
+            "article:modified_time",
+            "og:pubdate",
+            "pubdate",
+            "publish-date",
+            "date",
+            "DC.date",
+        )
+    )
+    if not date_str:
+        date_str = _clean_date(html_text) or date.today().strftime("%Y-%m-%d")
+
+    # Topic/category
+    topic = (
+        _meta_content(soup, "article:section", "section", "category", "news_keywords")
+        or topic_fallback.strip()
+    )
+    if "," in topic:
+        topic = topic.split(",")[0].strip()
+    if not topic:
+        topic = topic_fallback.strip() or "url-import"
+
+    # Body: choose the longest plausible article body among common selectors.
+    selectors = [
+        "article",
+        "[itemprop='articleBody']",
+        "div#articleBody",
+        "div#articleBodyContents",
+        "div#newsct_article",
+        "div.article_body",
+        "div.news_body",
+        "div.news_body_area",
+        "div.story-news",
+        "section",
+    ]
+    candidates = []
+    for sel in selectors:
+        node = soup.select_one(sel)
+        if not node:
+            continue
+        node = BeautifulSoup(str(node), "html.parser")
+        for bad in node(["script", "style", "iframe", "ins", "aside", "nav", "footer", "header", "button"]):
+            bad.decompose()
+        text = node.get_text("\n", strip=True)
+        text = re.sub(r"\n{2,}", "\n", text).strip()
+        if len(text) >= 80:
+            candidates.append(text)
+    if candidates:
+        body = max(candidates, key=len)
+    else:
+        p_texts = [p.get_text(" ", strip=True) for p in soup.find_all("p") if len(p.get_text(strip=True)) >= 20]
+        body = "\n".join(p_texts)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+
+    if not title and body:
+        title = body.splitlines()[0][:80]
+    if not body or len(body) < 80:
+        raise ValueError("본문 추출에 실패했습니다. 해당 사이트가 본문을 차단했거나 페이지 구조가 맞지 않습니다.")
+
+    return {
+        "title": title,
+        "subtitle": subtitle,
+        "summary": subtitle,
+        "body": body,
+        "date": date_str,
+        "outlet": outlet,
+        "topic": topic,
+        "url": url,
+    }
+
+
+
 def _article_date_value(article: dict):
     """날짜 문자열을 정렬 가능한 datetime으로 변환한다."""
     return pd.to_datetime(article.get("date") or article.get("published_at") or "", errors="coerce")
@@ -134,7 +386,10 @@ def _article_date_value(article: dict):
 
 def _article_text(article: dict) -> str:
     """audit_temporal_pair에 넣을 기사 텍스트를 합성한다."""
-    return " ".join(str(article.get(k, "")) for k in ["title", "summary", "body", "text", "content"] if article.get(k))
+    title = str(article.get("title", "") or "")
+    subtitle = str(article.get("subtitle") or article.get("summary") or article.get("description") or article.get("lead") or "")
+    body = str(article.get("body") or article.get("text") or article.get("content") or "")
+    return " ".join(p for p in [title, title, subtitle, body] if p)
 
 
 def build_adjacent_pair_audits(articles: list[dict], rules_data: dict, graph) -> list[dict]:
@@ -223,7 +478,7 @@ with tab1:
     # ── 입력 방식 선택 ────────────────────────────────────────────────────────
     input_mode = st.radio(
         "입력 방식",
-        ["📝 기사 직접 입력 (자동 JSON 변환)", "{ } JSON 직접 입력"],
+        ["📝 기사 직접 입력 (자동 JSON 변환)", "🔗 기사 URL 입력 (자동 추출)", "{ } JSON 직접 입력"],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -257,6 +512,7 @@ with tab1:
             f_topic  = fc2.text_input("사안 키워드 (topic)", placeholder="예: 정책X, 반도체법")
             f_date   = fc3.text_input("날짜 (date)", placeholder="2026-01-01")
             f_title  = st.text_input("제목 *", placeholder="기사 제목을 입력하세요")
+            f_subtitle = st.text_input("부제/요약 (선택)", placeholder="기사 부제, 리드문, 요약문이 있으면 입력하세요")
             f_body   = st.text_area("본문 *", placeholder="기사 본문을 여기에 붙여넣으세요. 길이 제한 없음.", height=200)
             submitted = st.form_submit_button("➕ 기사 추가", use_container_width=True, type="primary")
 
@@ -264,7 +520,7 @@ with tab1:
             if not f_title.strip() and not f_body.strip():
                 st.warning("제목 또는 본문을 입력해 주세요.")
             else:
-                entry: dict = {"title": f_title.strip(), "body": f_body.strip()}
+                entry: dict = {"title": f_title.strip(), "subtitle": f_subtitle.strip(), "summary": f_subtitle.strip(), "body": f_body.strip()}
                 if f_outlet.strip():
                     entry["outlet"] = f_outlet.strip()
                 if f_topic.strip():
@@ -302,7 +558,77 @@ with tab1:
             articles, err = [], "기사가 없습니다"
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # 모드 B: JSON 직접 입력 (기존 방식)
+    # 모드 B: URL 입력 → 기사 자동 추출
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    elif input_mode.startswith("🔗"):
+        if "article_list" not in st.session_state:
+            st.session_state.article_list = []
+
+        st.markdown("##### 🔗 기사 URL 자동 추출")
+        st.caption("URL만으로 제목·본문·매체·날짜·topic을 추출합니다. 사이트 구조/차단 정책에 따라 실패할 수 있으며, 실패 시 직접 입력 또는 JSON 입력을 사용하세요.")
+
+        default_topic = st.text_input(
+            "공통 사안 키워드 fallback (topic)",
+            placeholder="예: 에너지전환, 교육개혁, 신약허가",
+            help="기사 페이지에서 category/topic을 찾지 못하면 이 값을 사용합니다. 같은 topic이어야 시계열 그룹으로 묶입니다.",
+        )
+        url_text = st.text_area(
+            "기사 URL 목록",
+            placeholder="https://example.com/news/1\nhttps://example.com/news/2",
+            height=130,
+            help="여러 개를 넣을 때는 줄바꿈으로 구분하세요.",
+        )
+
+        c_fetch, c_clear = st.columns([2, 1])
+        if c_fetch.button("🌐 URL에서 기사 불러오기", use_container_width=True, type="primary"):
+            urls = [u.strip() for u in url_text.splitlines() if u.strip()]
+            if not urls:
+                st.warning("URL을 하나 이상 입력해 주세요.")
+            else:
+                added = 0
+                failures = []
+                with st.spinner(f"기사 {len(urls)}개를 가져오는 중입니다..."):
+                    for u in urls:
+                        try:
+                            article = fetch_article_from_url(u, topic_fallback=default_topic)
+                            st.session_state.article_list.append(article)
+                            added += 1
+                        except Exception as exc:
+                            failures.append({"url": u, "error": str(exc)})
+                if added:
+                    st.success(f"{added}개 기사 추출 완료 (현재 {len(st.session_state.article_list)}개)")
+                if failures:
+                    st.warning(f"{len(failures)}개 URL은 추출에 실패했습니다.")
+                    st.dataframe(pd.DataFrame(failures), use_container_width=True, hide_index=True)
+
+        if c_clear.button("🗑️ URL/직접 입력 기사 초기화", use_container_width=True):
+            st.session_state.article_list = []
+            st.rerun()
+
+        if st.session_state.article_list:
+            preview_rows = [
+                {
+                    "#": i + 1,
+                    "매체": a.get("outlet", "-"),
+                    "사안": a.get("topic", "-"),
+                    "날짜": a.get("date", "-"),
+                    "제목": a.get("title", "")[:50] + ("…" if len(a.get("title", "")) > 50 else ""),
+                    "본문길이": f"{len(a.get('body', ''))}자",
+                    "URL": a.get("url", "")[:45] + ("…" if len(a.get("url", "")) > 45 else ""),
+                }
+                for i, a in enumerate(st.session_state.article_list)
+            ]
+            st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+            with st.expander("📋 URL 추출 결과 JSON 보기"):
+                st.code(json.dumps(st.session_state.article_list, ensure_ascii=False, indent=2), language="json")
+            articles = st.session_state.article_list
+            err = None
+        else:
+            st.info("URL에서 기사를 불러온 뒤 분석을 실행하세요.")
+            articles, err = [], "기사가 없습니다"
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 모드 C: JSON 직접 입력 (기존 방식)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     else:
         raw_json = st.text_area(
@@ -476,6 +802,11 @@ with tab1:
         )
 
         st.caption(
+            "**5단계 정합성 밴드**: 85~100 안정적 정합 · 70~84 기준 부합 · "
+            "55~69 주의 필요 · 40~54 중점 검토 필요 · 0~39 기준 이탈"
+        )
+
+        st.caption(
             f"**axiom source**: `{result.get('axiom_source', '-')}`  |  "
             f"**primary group**: {result.get('primary_group_key', '-')}  |  "
             f"**polarity shift**: {result.get('polarity_shift', 0):.2f} "
@@ -490,6 +821,31 @@ with tab1:
 
         if result.get("verdict_reason"):
             st.info(f"📌 판정 핵심 근거: {result['verdict_reason']}")
+
+        # [v4.3] Stage 0 Validity Red Card — 5차원 점수보다 우선하는 상위 자격 심사
+        if result.get("validity_violation"):
+            red = result.get("validity_red_card", {}) or {}
+            st.error(
+                "⛔ Stage 0 Validity Red Card: 최소 사실/윤리 기준 위반이 감지되어 "
+                "최종 왜곡도는 100, 정합성 점수는 0으로 override되었습니다."
+            )
+            if red.get("hits"):
+                rc_df = pd.DataFrame([
+                    {
+                        "article": h.get("article_index"),
+                        "title": h.get("title"),
+                        "category": h.get("category"),
+                        "label": h.get("label"),
+                        "matched_text": h.get("matched_text"),
+                        "reason": h.get("reason"),
+                    }
+                    for h in red.get("hits", [])
+                ])
+                st.dataframe(rc_df, use_container_width=True, hide_index=True)
+            trace = result.get("validity_trace", [])
+            if trace:
+                with st.expander("🧬 Stage 0 Validity Reasoning Trace", expanded=True):
+                    st.dataframe(pd.DataFrame(trace), use_container_width=True, hide_index=True)
 
         if result.get("dimension_breakdown"):
             with st.expander("⚙️ 최종 axiom 차원별 페널티 분해 (graph audit 우선)", expanded=True):
@@ -790,6 +1146,9 @@ with tab1:
             "coherence_score": result.get("coherence_score"),
             "axiom_verdict": result.get("axiom_verdict"),
             "axiom_source": result.get("axiom_source"),
+            "validity_violation": result.get("validity_violation", False),
+            "validity_red_card": result.get("validity_red_card"),
+            "validity_trace": result.get("validity_trace", []),
             "primary_group_key": result.get("primary_group_key"),
             "v1_distortion_score": result.get("v1_distortion_score", result.get("score")),
             "v1_verdict": result.get("v1_verdict", result.get("verdict")),
@@ -839,7 +1198,6 @@ with tab1:
                 try:
                     import plotly.express as px
                     from sklearn.decomposition import PCA
-                    from sllm_extractor import _rule_text
 
                     article_text = " ".join(" ".join(str(a.get(k, "")) for k in ["title", "body"] if a.get(k)) for a in articles)
                     matched = result["matched_rules"]
@@ -891,7 +1249,7 @@ with tab1:
 
 with tab2:
     st.subheader("수동 지표 시뮬레이터")
-    st.caption("v1.2.4 baseline 5차원 평가 + 가중치 직접 조작. 기본값은 OWL baseline(0.34/cap40), 시계열 엄격 모드는 대안 프로파일로 시연합니다.")
+    st.caption("v2.0 baseline 5차원 평가 + 가중치 직접 조작. 기본값은 OWL baseline(0.34/cap40), 시계열 엄격 모드는 대안 프로파일로 시연합니다.")
 
     sim_mode = st.radio(
         "조작 대상",
@@ -930,15 +1288,15 @@ with tab2:
         # 프리셋
         preset = st.selectbox(
             "프리셋",
-            ["v1.2.4 baseline (OWL 기본값)", "시계열 엄격 (0.40/cap45)", "사실 우선", "프레임 우선", "다원 이성"],
+            ["v2.0 baseline (OWL 기본값)", "시계열 엄격 (0.40/cap45)", "사실 우선", "프레임 우선", "다원 이성"],
             help="다른 가치 입장으로 본 시스템을 보면 어떻게 바뀌는지 시연. 슬라이더를 직접 만져도 됨.",
         )
         PRESETS = {
-            "v1.2.2 (현재 기본값)":   (0.40, 0.22, 0.15, 0.13, 0.10),
-            "시계열 엄격":             (0.50, 0.18, 0.14, 0.10, 0.08),
-            "사실 우선":               (0.20, 0.18, 0.18, 0.14, 0.30),
-            "프레임 우선":             (0.25, 0.40, 0.13, 0.12, 0.10),
-            "다원 이성":               (0.25, 0.20, 0.15, 0.30, 0.10),
+            "v2.0 baseline (OWL 기본값)": (0.34, 0.24, 0.18, 0.14, 0.10),
+            "시계열 엄격 (0.40/cap45)":     (0.40, 0.22, 0.15, 0.13, 0.10),
+            "사실 우선":                   (0.20, 0.18, 0.18, 0.14, 0.30),
+            "프레임 우선":                 (0.25, 0.40, 0.13, 0.12, 0.10),
+            "다원 이성":                   (0.25, 0.20, 0.15, 0.30, 0.10),
         }
         ts0, fe0, co0, cd0, eq0 = PRESETS[preset]
 
@@ -1020,7 +1378,7 @@ with tab2:
 
     st.divider()
     st.subheader("Axiom cap 정규화 시뮬레이터")
-    st.caption("raw penalty가 per_dim_cap을 거쳐 weighted_distortion으로 바뀌는 과정을 직접 확인합니다. 예: temporal_shift -30, cap 40 → 정규화 75.0 × weight 0.34 = 25.5점 왜곡.")
+    st.caption("raw penalty가 per_dim_cap을 거쳐 weighted_distortion으로 바뀌는 과정을 직접 확인합니다. 예: temporal_shift -30, cap 45 → 정규화 66.7 × weight 0.34 = 22.7점 왜곡.")
     cap_cols = st.columns(6)
     cap_value = cap_cols[0].slider("per_dim_cap", 30.0, 80.0, float(PER_DIM_CAP), 1.0, key="cap_sim_value")
     raw_breakdown = {

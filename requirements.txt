@@ -1,19 +1,20 @@
-# Context-Sync v1.2.4 — 4단계 Streamlit 분석 도구
+# Context-Sync Curator — Streamlit Community Cloud profile (2nd deployment)
 # Python 3.10+
 
-# 핵심
 streamlit>=1.30
 rdflib>=7.0
 pandas>=2.0
 plotly>=5.18
 
-# 룰셋 검증 + LLM 추출 (선택)
+# Rule validation + optional OpenAI extraction
 pydantic>=2.0
 python-dotenv>=1.0
 openai>=1.40
 
-# Dense RAG (선택 — 한국어 의미 임베딩)
-sentence-transformers>=2.6
-scikit-learn>=1.3
+# HTML/article fetch helpers
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
 
-# Sparse RAG (Jaccard)는 표준 라이브러리만 사용
+# Dense RAG / local sLLM dependencies are intentionally excluded from this cloud profile.
+# For local Dense RAG or Hugging Face sLLM inference, install requirements-sllm.txt instead.

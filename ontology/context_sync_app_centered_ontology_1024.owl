@@ -227,7 +227,7 @@
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#engine_context_sync_rule_engine">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#RuleEngine"/>
     <rdfs:label xml:lang="en">Context-Sync Rule Engine</rdfs:label>
-    <evaluationFormula xml:lang="en">final_distortion = 0.34*temporal_shift + 0.24*frame_effect + 0.18*context_omission + 0.14*consensus_deviation + 0.10*evidence_quality; verdict thresholds: &lt;35 aligned, 35-64 caution, &gt;=65 deviated; per_dim_cap=40 (baseline); strict_temporal_profile=0.40/cap45 optional</evaluationFormula>
+    <evaluationFormula xml:lang="en">final_distortion = 0.34*temporal_shift + 0.24*frame_effect + 0.18*context_omission + 0.14*consensus_deviation + 0.10*evidence_quality; five-level verdict bands (distortion): 0-15 stable_aligned, 16-30 aligned, 31-45 caution, 46-60 high_caution, 61-100 deviated; per_dim_cap=45 (baseline); strict_temporal_profile=0.40/cap45 optional; headline_weighting title=1.5/subtitle=1.25/body=1.0; frame_soft_cap groups same target_frame rules before dimension normalization; effective_frame_cap=base_frame_cap*mitigation_factor for explanation-sensitive frames (v2.1.8)</evaluationFormula>
     <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_aligned"/>
     <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_caution"/>
     <producesVerdict rdf:resource="http://www.context-sync.com/ontology/news-app#verdict_deviated"/>
@@ -754,8 +754,8 @@
     <rdfs:label>news_rules_1024.json</rdfs:label>
     <externalRuleFile>news_rules_1024.json</externalRuleFile>
     <ruleCount rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1024</ruleCount>
-    <version>v2.1.4-baseline-restored-with-explanation-mitigation</version>
-    <descriptionKo xml:lang="ko">evidence_quality를 포함한 5차원 평가식과 OWL 확장 프레임 M03/M05/M06, M02 보강분을 반영한 1024개 외부 JSON 룰셋. v2.1.4에서는 OWL baseline 가중치(0.34/0.24/0.18/0.14/0.10)와 per_dim_cap=40을 기본값으로 복귀하고, 설명 충실도에 따른 부가 페널티 완화(explanation mitigation)를 엔진 계층에서 반영한다.</descriptionKo>
+    <version>v2.1.6-five-level-verdict-consistent</version>
+    <descriptionKo xml:lang="ko">evidence_quality를 포함한 5차원 평가식과 OWL 확장 프레임 M03/M05/M06, M02 보강분을 반영한 1024개 외부 JSON 룰셋. OWL baseline 가중치(0.34/0.24/0.18/0.14/0.10)와 per_dim_cap=45를 기본값으로 하며, 설명 충실도 기반 explanation mitigation, 5단계 verdict 농도 모델(안정적 정합/기준 부합/주의 필요/중점 검토 필요/기준 이탈), 제목·부제 가중치(title 1.5/subtitle 1.25/body 1.0)와 동일 프레임 룰 다발 발화 제어를 위한 frame-level soft cap과 설명 충실도 기반 effective_frame_cap(base_cap×mitigation_factor)을 엔진 계층에서 반영한다.</descriptionKo>
   </rdf:Description>
   <rdf:Description rdf:about="http://www.context-sync.com/ontology/news-app#ctx_Diplomacy">
     <rdf:type rdf:resource="http://www.context-sync.com/ontology/news-app#Topic"/>

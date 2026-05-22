@@ -16,9 +16,10 @@ def _compact_articles(articles: List[Dict[str, Any]], max_chars: int = 6500) -> 
         date = str(a.get("date") or a.get("published_at") or "")
         outlet = str(a.get("outlet", ""))
         topic = str(a.get("topic", ""))
-        body = str(a.get("body") or a.get("text") or a.get("content") or a.get("summary") or "")
+        subtitle = str(a.get("subtitle") or a.get("summary") or a.get("description") or a.get("lead") or "")
+        body = str(a.get("body") or a.get("text") or a.get("content") or "")
         body = body[:1200]
-        chunks.append(f"[{i}] date={date} outlet={outlet} topic={topic}\nTITLE: {title}\nBODY: {body}")
+        chunks.append(f"[{i}] date={date} outlet={outlet} topic={topic}\nTITLE: {title}\nSUBTITLE: {subtitle}\nBODY: {body}")
     text = "\n\n".join(chunks)
     return text[:max_chars]
 
@@ -26,7 +27,7 @@ def _compact_articles(articles: List[Dict[str, Any]], max_chars: int = 6500) -> 
 def build_prompt(articles: List[Dict[str, Any]], rules_context: str = "") -> str:
     article_text = _compact_articles(articles)
     return f"""당신은 뉴스 시계열 논조 분석기의 sLLM 추출기입니다.
-아래 기사 묶음을 읽고 다섯 가지 수치 지표를 0~100 사이 정수로 산출하세요.
+아래 기사 묶음을 읽고 다섯 가지 수치 지표를 0~100 사이 정수로 산출하세요. 제목과 부제는 본문보다 강한 프레임 신호로 고려하되, 단일 표현만으로 과잉 판정하지 마세요.
 반드시 JSON 하나만 출력하세요. 설명 문장은 reason 안에만 넣으세요.
 
 평가 지표:
@@ -119,132 +120,13 @@ def _rule_text(r: Dict[str, Any]) -> str:
     return " ".join(p for p in parts if p)
 
 
-def _score_sparse_rules(article_text: str, rules: List[Dict[str, Any]]) -> List[Tuple[float, Dict[str, Any]]]:
-    """Sparse Jaccard 기반 룰 점수화. Dense 실패 시에도 같은 fallback을 사용한다."""
-    query_tokens = _tokenize_ko(article_text)
-    if not query_tokens:
-        return []
-    scored: List[Tuple[float, Dict[str, Any]]] = []
-    for r in rules:
-        rule_tokens = _tokenize_ko(_rule_text(r))
-        if not rule_tokens:
-            continue
-        intersection = len(query_tokens & rule_tokens)
-        union = len(query_tokens | rule_tokens)
-        jaccard = intersection / union if union > 0 else 0.0
-        scored.append((jaccard, r))
-    return scored
-
-
-def _score_dense_rules(
-    article_text: str,
-    rules: List[Dict[str, Any]],
-    dense_model: Any,
-    rule_embeddings: Any,
-) -> List[Tuple[float, Dict[str, Any]]]:
-    """Dense 임베딩 기반 코사인 유사도 점수화. 실패 시 빈 리스트."""
-    try:
-        from sklearn.metrics.pairwise import cosine_similarity
-        query_emb = dense_model.encode([article_text])
-        sims = cosine_similarity(query_emb, rule_embeddings)[0]
-        return [(float(sim), r) for sim, r in zip(sims, rules)]
-    except Exception:
-        return []
-
-
-def compare_rag_results(
-    articles: List[Dict[str, Any]],
-    rules_data: Dict[str, Any],
-    top_k: int = 8,
-    dense_model: Optional[Any] = None,
-    rule_embeddings: Optional[Any] = None,
-    min_sparse_score: float = 0.001,
-    min_dense_score: float = 0.15,
-) -> Dict[str, Any]:
-    """[v4 보강] Sparse와 Dense 검색을 *동시에* 실행해 결과를 나란히 반환한다.
-
-    포트폴리오/시연 가치:
-      *"이중 RAG"*가 정말로 *두 검색기를 동시에* 작동시키는 모습 시연.
-      Sparse는 *키워드 매칭* (고유명사·정확 일치에 강함),
-      Dense는 *의미 임베딩* (구조적 유사성에 강함).
-      두 결과의 *교집합/차집합*이 그 자체로 정보가 됨.
-
-    Returns:
-        {
-            "sparse_top": [(score, rule_dict), ...],  # 상위 top_k
-            "dense_top": [(score, rule_dict), ...],
-            "sparse_available": bool,
-            "dense_available": bool,
-            "common_ids": [rule_id, ...],           # Sparse ∩ Dense
-            "sparse_only_ids": [rule_id, ...],      # Sparse - Dense
-            "dense_only_ids": [rule_id, ...],       # Dense - Sparse
-            "article_text_length": int,
-            "min_sparse_score": float,
-            "min_dense_score": float,
-            "sparse_filtered_count": int,
-            "dense_filtered_count": int,
-        }
-    """
-    article_text = " ".join(
-        " ".join(str(a.get(k, "")) for k in ["title", "body", "summary", "text", "content"] if a.get(k))
-        for a in articles
-    )
-    rules = rules_data.get("rules", [])
-    result = {
-        "sparse_top": [],
-        "dense_top": [],
-        "sparse_available": False,
-        "dense_available": False,
-        "common_ids": [],
-        "sparse_only_ids": [],
-        "dense_only_ids": [],
-        "article_text_length": len(article_text),
-        "min_sparse_score": float(min_sparse_score),
-        "min_dense_score": float(min_dense_score),
-        "sparse_filtered_count": 0,
-        "dense_filtered_count": 0,
-    }
-
-    if not article_text.strip() or not rules:
-        return result
-
-    # Sparse는 항상 시도
-    sparse_scored = _score_sparse_rules(article_text, rules)
-    if sparse_scored:
-        sparse_scored.sort(key=lambda x: x[0], reverse=True)
-        sparse_filtered = [(score, rule) for score, rule in sparse_scored if float(score) >= min_sparse_score]
-        result["sparse_filtered_count"] = max(0, len(sparse_scored) - len(sparse_filtered))
-        result["sparse_top"] = sparse_filtered[:top_k]
-        result["sparse_available"] = bool(result["sparse_top"])
-
-    # Dense는 모델이 있을 때만
-    if dense_model is not None and rule_embeddings is not None:
-        dense_scored = _score_dense_rules(article_text, rules, dense_model, rule_embeddings)
-        if dense_scored:
-            dense_scored.sort(key=lambda x: x[0], reverse=True)
-            dense_filtered = [(score, rule) for score, rule in dense_scored if float(score) >= min_dense_score]
-            result["dense_filtered_count"] = max(0, len(dense_scored) - len(dense_filtered))
-            result["dense_top"] = dense_filtered[:top_k]
-            result["dense_available"] = bool(result["dense_top"])
-
-    # 교집합/차집합 (rule_id 기준)
-    sparse_ids = {r.get("rule_id") for _, r in result["sparse_top"]}
-    dense_ids = {r.get("rule_id") for _, r in result["dense_top"]}
-    result["common_ids"] = sorted(sparse_ids & dense_ids)
-    result["sparse_only_ids"] = sorted(sparse_ids - dense_ids)
-    result["dense_only_ids"] = sorted(dense_ids - sparse_ids)
-
-    return result
-
-
 def search_relevant_rules(
     articles: List[Dict[str, Any]],
     rules_data: Dict[str, Any],
     top_k: int = 8,
     dense_model: Optional[Any] = None,
     rule_embeddings: Optional[Any] = None,
-    return_mode: bool = False,
-) -> Any:
+) -> str:
     """기사 텍스트와 룰 간의 연관성을 계산하여 top_k개를 선택해 반환한다.
 
     dense_model과 rule_embeddings가 주어지면 Sentence-Transformers 기반의
@@ -252,39 +134,48 @@ def search_relevant_rules(
     """
     # 기사 텍스트 합성
     article_text = " ".join(
-        " ".join(str(a.get(k, "")) for k in ["title", "body", "summary", "text", "content"] if a.get(k))
+        " ".join([
+            str(a.get("title", "")),
+            str(a.get("title", "")),
+            str(a.get("subtitle") or a.get("summary") or a.get("description") or a.get("lead") or ""),
+            str(a.get("body") or a.get("text") or a.get("content") or ""),
+        ])
         for a in articles
     )
-    mode = "sparse_jaccard"
-    rules = rules_data.get("rules", [])
-
     if not article_text.strip():
-        formatted = _format_rules(rules[:top_k])
-        return (formatted, "empty_article_fallback") if return_mode else formatted
+        # fallback: 기사가 없으면 기존 방식으로 상위 k개 반환
+        return _format_rules(rules_data.get("rules", [])[:top_k])
 
     if dense_model is not None and rule_embeddings is not None:
         try:
             from sklearn.metrics.pairwise import cosine_similarity
             query_emb = dense_model.encode([article_text])
             sims = cosine_similarity(query_emb, rule_embeddings)[0]
-            scored = [(float(sim), r) for sim, r in zip(sims, rules)]
-            mode = "dense"
+            scored = [(sim, r) for sim, r in zip(sims, rules_data.get("rules", []))]
         except Exception:
-            # Dense 검색 실패 시 룰셋 앞부분으로 떨어지지 말고 Sparse Jaccard로 재시도한다.
-            scored = _score_sparse_rules(article_text, rules)
-            mode = "dense_failed_sparse_fallback"
+            # Fallback if scikit-learn is missing
+            scored = []
     else:
-        scored = _score_sparse_rules(article_text, rules)
-        mode = "sparse_jaccard"
+        query_tokens = _tokenize_ko(article_text)
+        if not query_tokens:
+            return _format_rules(rules_data.get("rules", [])[:top_k])
+
+        scored = []
+        for r in rules_data.get("rules", []):
+            rule_tokens = _tokenize_ko(_rule_text(r))
+            if not rule_tokens:
+                continue
+            intersection = len(query_tokens & rule_tokens)
+            union = len(query_tokens | rule_tokens)
+            jaccard = intersection / union if union > 0 else 0.0
+            scored.append((jaccard, r))
 
     if not scored:
-        formatted = _format_rules(rules[:top_k])
-        return (formatted, f"{mode}_empty_scored_fallback") if return_mode else formatted
+        return _format_rules(rules_data.get("rules", [])[:top_k])
 
     scored.sort(key=lambda x: x[0], reverse=True)
     top_rules = [r for _, r in scored[:top_k]]
-    formatted = _format_rules(top_rules)
-    return (formatted, mode) if return_mode else formatted
+    return _format_rules(top_rules)
 
 
 def _format_rules(rules: List[Dict[str, Any]]) -> str:
@@ -312,12 +203,8 @@ def extract_features_with_sllm(
 
     If OpenAI GPT model is specified, it runs API call without needing transformers/torch.
     """
-    rag_selected_rules, actual_rag_mode = search_relevant_rules(
-        articles,
-        rules_data,
-        dense_model=dense_model,
-        rule_embeddings=rule_embeddings,
-        return_mode=True,
+    rag_selected_rules = search_relevant_rules(
+        articles, rules_data, dense_model=dense_model, rule_embeddings=rule_embeddings
     )
     prompt = build_prompt(articles, rag_selected_rules)
 
@@ -390,6 +277,6 @@ def extract_features_with_sllm(
         "reason": parsed.get("reason", ""),
         "prompt_preview": prompt[:1600],
         "rag_selected_rules": rag_selected_rules,
-        "rag_mode": actual_rag_mode,
+        "rag_mode": "dense" if (dense_model is not None and rule_embeddings is not None) else "sparse_jaccard",
     }
     return features, meta
