@@ -2,7 +2,10 @@
 
 > *LLM이 OWL 통제 어휘 안에서 추출한 담론 구조를, 1024개 JSON 룰로 검증하고, axiom 5차원 정규화 점수로 환산하는 **ontology-calibrated reasoning** 시스템.*
 
-**현재 버전: v2.1** (4단계 — 기사 묶음 일괄 분석, Streamlit) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/`](./legacy/v1.0-3.5stage/)에 보존
+**Live Demo**: <https://context-sync-curator1.streamlit.app/>  
+**GitHub Repository**: <https://github.com/downteam7-crypto/context-sync.curator1>
+
+**현재 버전: v2.1** (4단계 — 기사 묶음 일괄 분석, Streamlit) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/로드맵_3단계`](./legacy/로드맵_3단계/)에 보존
 
 뉴스 기사 묶음의 시계열 논조 변화가 *맥락 정합성* 안에서 일관되는지, 아니면 *기준 이탈*인지를 다층적으로 평가하는 프로토타입.
 
@@ -246,6 +249,7 @@ final_distortion + verdict + reasoning_trace
 
 본 저장소는 Streamlit Community Cloud에서 바로 실행 가능한 **경량 웹 배포판**을 기준으로 정리되어 있다.
 
+- Live Demo: <https://context-sync-curator1.streamlit.app/>
 - GitHub 저장소: <https://github.com/downteam7-crypto/context-sync.curator1>
 - Cloud main file path: `app.py`
 - 기본 의존성: `requirements.txt`
@@ -454,7 +458,7 @@ context-sync.curator1/
 
 ## 변경 이력
 
-> **버전 체계 안내**: 4단계 Streamlit 분석 도구는 *3.5단계까지의 Gradio Hybrid(legacy v1.x)와 별개의 메이저 라인*으로, **v2.0부터 새로 시작**한다. 즉 *4단계 진입 = v2.0*. legacy의 v1.0~v1.2.2는 `legacy/v1.0-3.5stage/`에 보존된다. (룰셋/OWL 데이터셋 내부 버전인 `v2.1.6-...`은 *데이터셋 자체의 일련 번호*이며 앱 버전과 별개 네임스페이스다.)
+> **버전 체계 안내**: 4단계 Streamlit 분석 도구는 *3.5단계까지의 Gradio Hybrid(legacy v1.x)와 별개의 메이저 라인*으로, **v2.0부터 새로 시작**한다. 즉 *4단계 진입 = v2.0*. legacy의 v1.0~v1.2.2는 `legacy/로드맵_3단계/`에 보존된다. (룰셋/OWL 데이터셋 내부 버전인 `v2.1.6-...`은 *데이터셋 자체의 일련 번호*이며 앱 버전과 별개 네임스페이스다.)
 
 ### v2.1 (현재) — 5단계 판정 농도 + 제목 가중치 + frame-level soft cap
 
@@ -492,7 +496,7 @@ context-sync.curator1/
 - 시계열 엄격 모드 (legacy 3.5단계의 0.40/cap 45)는 시뮬레이터 프리셋으로 유지
 
 **구조 정리**:
-- `legacy/v1.0-3.5stage/`에 v1.0~v1.2.2 Gradio Hybrid 보존
+- `legacy/로드맵_3단계/`에 v1.0~v1.2.2 Gradio Hybrid 보존
 - `build_reasoning_trace` 등 *3층 분리 원칙* 정합 리팩토링
 
 ### legacy v1.0 ~ v1.2.2 (3.5단계) — Gradio Hybrid
