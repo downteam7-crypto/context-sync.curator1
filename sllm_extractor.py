@@ -19,6 +19,16 @@ else:
     DEFAULT_MODEL = "gpt-4o-mini"
 
 
+def is_cloud_mode() -> bool:
+    """Return True when running in the Streamlit Community Cloud profile.
+
+    The default is intentionally Cloud-like ("1") so that public deployments do
+    not accidentally select local Hugging Face/sentence-transformers paths.
+    Local advanced mode should be launched with STREAMLIT_CLOUD=0.
+    """
+    return os.getenv("STREAMLIT_CLOUD", "1") == "1"
+
+
 def _compact_articles(articles: List[Dict[str, Any]], max_chars: int = 6500) -> str:
     chunks = []
     for i, a in enumerate(articles, 1):
@@ -97,7 +107,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
         except json.JSONDecodeError:
             pass
 
-    raise ValueError("sLLM 응답에서 JSON 객체를 찾지 못했습니다.")
+    raise ValueError("LLM 응답에서 JSON 객체를 찾지 못했습니다.")
 
 
 def _normalize_features(data: Dict[str, Any]) -> Dict[str, float]:
@@ -320,10 +330,18 @@ def extract_features_with_sllm(
         payload = {
             "model": model_name,
             "messages": [
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a JSON-only extraction engine. "
+                        "Return exactly one valid JSON object and no extra text."
+                    ),
+                },
+                {"role": "user", "content": prompt},
             ],
             "temperature": temperature,
-            "max_tokens": max_new_tokens
+            "max_tokens": max_new_tokens,
+            "response_format": {"type": "json_object"},
         }
         
         response = requests.post(
@@ -362,7 +380,30 @@ def extract_features_with_sllm(
         )
         raw = outputs[0].get("generated_text", "") if outputs else ""
 
-    parsed = _extract_json(raw)
+    try:
+        parsed = _extract_json(raw)
+    except ValueError as e:
+        raw_preview = (raw or "")[:500].replace("\n", " ")
+        if is_openai and is_cloud_mode():
+            raise ValueError(
+                "Cloud OpenAI 응답에서 JSON 객체를 찾지 못했습니다. "
+                "모델이 JSON 형식을 지키지 않았거나 출력이 중간에 잘렸을 수 있습니다. "
+                "모델명을 gpt-4o-mini 또는 gpt-4o로 확인하고, max_new_tokens를 늘려보세요. "
+                f"응답 미리보기: {raw_preview}"
+            ) from e
+        if is_openai:
+            raise ValueError(
+                "로컬 실행 중 OpenAI 응답에서 JSON 객체를 찾지 못했습니다. "
+                "response_format 설정, 모델명, max_new_tokens를 확인하세요. "
+                f"응답 미리보기: {raw_preview}"
+            ) from e
+        raise ValueError(
+            "로컬 sLLM 응답에서 JSON 객체를 찾지 못했습니다. "
+            "소형 Hugging Face 모델이 JSON 형식을 지키지 않았을 가능성이 큽니다. "
+            "max_new_tokens를 늘리거나 GPT 계열 모델을 사용해 보세요. "
+            f"응답 미리보기: {raw_preview}"
+        ) from e
+
     features = _normalize_features(parsed)
     meta = {
         "model": model_name,

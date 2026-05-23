@@ -802,8 +802,8 @@ with tab1:
         )
 
         st.caption(
-            "**5단계 정합성 밴드**: 85~100 안정적 정합 · 70~84 기준 부합 · "
-            "55~69 주의 필요 · 40~54 중점 검토 필요 · 0~39 기준 이탈"
+            "**5단계 정합성 밴드**: 85 ~ 100 안정적 정합 · 70 ~ 84 기준 부합 · "
+            "55 ~ 69 주의 필요 · 40 ~ 54 중점 검토 필요 · 0 ~ 39 기준 이탈"
         )
 
         st.caption(
@@ -1249,7 +1249,7 @@ with tab1:
 
 with tab2:
     st.subheader("수동 지표 시뮬레이터")
-    st.caption("v2.0 baseline 5차원 평가 + 가중치 직접 조작. 기본값은 OWL baseline(0.34/cap40), 시계열 엄격 모드는 대안 프로파일로 시연합니다.")
+    st.caption("v2.0 baseline 5차원 평가 + 가중치 직접 조작. 기본값은 OWL baseline(0.34/cap45), 시계열 엄격 모드는 대안 프로파일로 시연합니다.")
 
     sim_mode = st.radio(
         "조작 대상",
@@ -1458,23 +1458,75 @@ streamlit run app.py
     st.warning("Streamlit Community Cloud 무료 환경 등에서는 로컬 sLLM 연동 시 메모리 한계나 실행 지연이 있을 수 있으므로 GPT API를 사용하거나 Ollama, HF Inference API 등 외부 API로 위임하는 것을 권장합니다.")
 
 with tab5:
-    st.subheader("GitHub/Streamlit 배포 구조")
-    st.write("이 패키지는 GitHub 저장소에 올리기 쉽게 코드와 소형 기준 파일만 포함합니다.")
+    st.subheader("GitHub / Streamlit Cloud 배포 구조")
+    st.caption("현재 공개 저장소와 Streamlit Community Cloud 2차 배포 기준을 반영한 구조입니다.")
+
+    st.markdown(
+        "- **Live Demo**: <https://context-sync-curator1.streamlit.app/>\n"
+        "- **GitHub Repository**: <https://github.com/downteam7-crypto/context-sync.curator1>\n"
+        "- **Cloud main file path**: `app.py`\n"
+        "- **Cloud 기본 실행 모드**: OpenAI API + OWL/JSON rule engine 중심의 경량 배포"
+    )
+
+    st.markdown("#### 저장소 구조")
     st.code(
-        """context-sync-news-analyzer/
-├─ app.py
-├─ rule_engine.py
-├─ requirements.txt
+        """context-sync.curator1/
+├─ app.py                         # Streamlit 메인 앱
+├─ rule_engine.py                 # OWL/JSON 기반 axiom audit 계산 엔진
+├─ sllm_extractor.py              # OpenAI GPT 추출기 + 로컬 sLLM/Dense RAG 옵션
+├─ requirements.txt               # Streamlit Cloud 경량 의존성
+├─ requirements-sllm.txt          # 로컬 sLLM / Dense RAG 고급 의존성
 ├─ README.md
+├─ LICENSE
+├─ .env.example
 ├─ .gitignore
-├─ .streamlit/config.toml
+├─ .streamlit/
+│  └─ config.toml
 ├─ ontology/
 │  ├─ context_sync_app_centered_ontology_1024.owl
 │  └─ news_rules_1024.json
-└─ sample_data/
-   └─ sample_articles.json
+├─ sample_data/
+│  ├─ sample_articles.json
+│  └─ sample_scenarios.json
+├─ docs/
+│  ├─ 01_problem_framing.md
+│  ├─ 02_cognition_and_metacognition.md
+│  ├─ 03_hybrid_ontology.md
+│  └─ 04_background.md
+├─ legacy/
+│  └─ 로드맵_3단계/
+│     └─ v1.0-3.5stage/
+└─ comparison/
+   ├─ README.md
+   └─ axiom_tracker_pure_llm.py
 """,
         language="text",
     )
-    st.write("대용량 기사 원문, 임베딩 DB, 캐시, 가상환경은 `.gitignore`로 제외합니다.")
-    st.write("GitHub에는 코드와 가벼운 기준층만 두고, 수십 GB 데이터는 Google Drive API/S3/DB에 두는 구조가 안전합니다.")
+
+    st.markdown("#### Cloud 배포 범위")
+    st.write(
+        "Streamlit Cloud에서는 `requirements.txt`만 설치해 앱을 가볍게 실행합니다. "
+        "`torch`, `transformers`, `sentence-transformers`, `scikit-learn` 기반의 Dense RAG/로컬 sLLM 기능은 "
+        "`requirements-sllm.txt`로 분리해 로컬 실행 옵션으로 둡니다."
+    )
+    st.code(
+        """# Cloud
+streamlit run app.py
+
+# Local advanced mode
+pip install -r requirements.txt
+pip install -r requirements-sllm.txt
+STREAMLIT_CLOUD=0 streamlit run app.py
+""",
+        language="bash",
+    )
+
+    st.markdown("#### 비밀키 / 대용량 데이터 원칙")
+    st.write(
+        "OpenAI API Key는 GitHub에 올리지 않고 Streamlit Cloud의 Secrets 또는 로컬 `.env`에 둡니다. "
+        "대용량 기사 원문, 임베딩 DB, 캐시, 가상환경, `__pycache__`/`.pyc` 파일은 저장소에서 제외합니다."
+    )
+    st.info(
+        "Cloud 데모는 경량 배포판입니다. Dense RAG, sentence-transformers 시각화, 로컬 Hugging Face sLLM은 "
+        "GitHub 저장소를 내려받아 로컬에서 실행할 때 사용하는 고급 옵션입니다."
+    )
