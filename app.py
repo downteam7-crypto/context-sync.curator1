@@ -1195,11 +1195,13 @@ with tab1:
         # ─────────────────────────────────────────────────────────
         graph_audits = result.get("graph_audits", [])
         if articles and len(articles) >= 2:
-            st.subheader("3.5. OWL 그래프 추론 (main axiom audit)")
+            st.subheader("3.5. OWL 그래프 추론 및 actual fired_rules")
             st.caption(
-                "이 섹션의 graph audit 결과가 이제 메인 `axiom_distortion`의 1순위 입력입니다. "
-                "같은 outlet+topic 그룹의 시간순 첫 기사와 마지막 기사를 비교해 "
-                "OWL `conflictsWith` / `reinforces` / `calibratesDimension` 관계와 JSON 룰 발화를 추적합니다."
+                "graph audit 결과가 메인 `axiom_distortion`의 1순위 입력입니다. "
+                "이 섹션에서는 같은 outlet+topic 그룹의 시간순 첫 기사와 마지막 기사를 비교하고, "
+                "최종 점수에 직접 기여한 `actual axiom fired_rules`까지 함께 묶어 보여줍니다. "
+                "아래 후보 규칙 해설 섹션(3.7)은 중복 표기가 아니라, feature 기반 후보 룰의 "
+                "schema/frame/context/cue 차이를 설명하는 보조 영역입니다."
             )
 
             if not graph_audits:
@@ -1350,25 +1352,44 @@ with tab1:
                 for reason in audit.get("reasons", []):
                     st.markdown(f"- {reason}")
 
-        st.subheader("4. 규칙 결과: actual axiom fired_rules + feature 후보 규칙")
+        st.subheader("3.7. 후보 규칙 해설 및 RuleSchema 발화 분포")
+        st.caption(
+            "위 3.5/3.6 섹션은 최종 axiom 점수에 직접 기여한 actual fired_rules를 graph audit 맥락에서 보여줍니다. "
+            "이 섹션은 같은 룰을 다시 나열하기보다, feature 기반 후보 규칙이 어떤 schema/frame/context/cue 차이로 갈리는지와 "
+            "차원별 발화 분포를 해설하는 보조 영역입니다."
+        )
         fired_df = pd.DataFrame(result.get("axiom_fired_rules", []))
         candidate_df = pd.DataFrame(result.get("candidate_rules", result.get("matched_rules", [])))
 
         if not fired_df.empty:
-            st.markdown("**Actual axiom fired_rules** — 최종 axiom_distortion에 직접 기여한 룰")
-            hide_cols = ["llm_instruction_ko", "positive_cues", "negative_indicators",
-                         "frame_definition_ko", "schema_description_ko", "expected_evidence_ko", "score_hint"]
-            st.dataframe(fired_df.drop(columns=hide_cols, errors="ignore"), width="stretch", hide_index=True)
+            st.success(
+                f"Actual axiom fired_rules {len(fired_df)}개가 최종 axiom_distortion에 직접 기여했습니다. "
+                "상세 표는 위 `3.5. OWL 그래프 추론 및 actual fired_rules`의 각 graph audit expander 안에서 확인하세요."
+            )
+            with st.expander("Actual axiom fired_rules 전체표 보기 (중복 방지용 접힘)", expanded=False):
+                hide_cols = [
+                    "llm_instruction_ko", "positive_cues", "negative_indicators",
+                    "frame_definition_ko", "schema_description_ko", "expected_evidence_ko", "score_hint"
+                ]
+                st.caption(
+                    "이 표는 검산·디버깅용 전체 목록입니다. 기본 화면에서는 graph audit 흐름 안에서 fired rule을 확인하도록 접어 두었습니다."
+                )
+                st.dataframe(fired_df.drop(columns=hide_cols, errors="ignore"), width="stretch", hide_index=True)
         else:
-            st.info("최종 graph audit에서 실제 axiom fired_rules가 없거나 graph audit이 불가능했습니다. 아래 후보 규칙은 보조 참고용입니다.")
+            st.info(
+                "최종 graph audit에서 actual fired_rules가 없거나 graph audit이 불가능했습니다. "
+                "아래 후보 규칙은 feature 기반 보조 참고용입니다."
+            )
 
         if not candidate_df.empty:
-            with st.expander("📋 Feature 기반 후보 규칙 해설 — 룰별 차이 중심", expanded=not fired_df.empty):
+            with st.expander("📋 Feature 기반 후보 규칙 해설 — 룰별 차이 중심", expanded=True):
                 render_candidate_rule_explanations(
                     result.get("candidate_rules", result.get("matched_rules", [])),
                     sllm_meta=sllm_meta,
                     cloud_mode=cloud_mode,
                 )
+        else:
+            st.info("표시할 feature 기반 후보 규칙이 없습니다.")
 
         with st.expander("🧭 RuleSchema / Dimension 발화 heatmap", expanded=False):
             render_rule_heatmap(
@@ -1377,7 +1398,7 @@ with tab1:
             )
 
         # ── [D] 결과 Export ───────────────────────────────────────────────────
-        st.subheader("5. 결과 다운로드")
+        st.subheader("4. 결과 다운로드")
         exp_c1, exp_c2 = st.columns(2)
         # JSON export
         export_json = json.dumps({
