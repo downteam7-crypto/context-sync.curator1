@@ -172,10 +172,18 @@ with st.sidebar:
         value=DEFAULT_MODEL,
         help="Streamlit Cloud에서는 OpenAI GPT 계열 사용을 권장합니다. Hugging Face 로컬 sLLM은 로컬 실행용입니다.",
     )
+    # Safe secrets access to avoid StreamlitSecretNotFoundError when secrets.toml is missing
+    default_key = ""
+    try:
+        if hasattr(st, "secrets"):
+            default_key = st.secrets.get("OPENAI_API_KEY", "")
+    except Exception:
+        pass
+
     openai_api_key = st.text_input(
         "OpenAI API Key",
         type="password",
-        value=st.secrets.get("OPENAI_API_KEY", "") if hasattr(st, "secrets") else "",
+        value=default_key,
         help="GPT 모델 이용 시 필요합니다. Streamlit Cloud Secrets 또는 사이드바 입력을 사용할 수 있습니다.",
     )
     sllm_max_tokens = st.slider("LLM max_new_tokens", 80, 500, 220)
@@ -467,6 +475,251 @@ def render_rule_heatmap(fired_rules: list[dict], candidate_rules: list[dict]):
     st.markdown("**Penalty sum by dimension**")
     penalty_df = hm_df.groupby("dimension", as_index=False)["penalty_abs"].sum().sort_values("penalty_abs", ascending=False)
     st.bar_chart(penalty_df.set_index("dimension")["penalty_abs"])
+
+
+
+def _short_text(value, limit: int = 110) -> str:
+    """UI 표 안에서 너무 긴 룰 설명을 짧게 접는다."""
+    if value is None:
+        return ""
+    text = str(value).replace("\n", " ").strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _join_rule_items(value, max_items: int = 3, limit: int = 120) -> str:
+    """positive_cues / negative_indicators / expected_evidence 등을 표용 문자열로 변환."""
+    if isinstance(value, list):
+        items = [str(v).strip() for v in value if str(v).strip()]
+        shown = items[:max_items]
+        suffix = f" 외 {len(items) - max_items}개" if len(items) > max_items else ""
+        return _short_text(" / ".join(shown) + suffix, limit)
+    if isinstance(value, dict):
+        return _short_text(json.dumps(value, ensure_ascii=False), limit)
+    return _short_text(value, limit)
+
+
+def _value_signature(value) -> str:
+    """룰별 차이 필드 계산을 위한 안정적 문자열 표현."""
+    if isinstance(value, list):
+        return " | ".join(str(v) for v in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def _candidate_rule_row(rule: dict) -> dict:
+    """후보 룰의 '실제로 다른 부분'을 한 줄로 비교할 수 있게 만든다."""
+    return {
+        "rule_id": rule.get("rule_id", ""),
+        "fired": rule.get("is_fired", ""),
+        "schema": rule.get("schema_id", ""),
+        "frame": rule.get("target_frame", ""),
+        "dimension": rule.get("dimension", ""),
+        "context": rule.get("context", ""),
+        "profile": rule.get("profile", ""),
+        "severity": rule.get("severity_band", ""),
+        "value_anchor": rule.get("value_anchor", ""),
+        "axiom_penalty": rule.get("axiom_penalty", 0),
+        "strength": rule.get("rule_strength", 0),
+        "intensity": rule.get("intensity", 0),
+        "risk_weight": rule.get("risk_weight", ""),
+        "distortion_weight": rule.get("distortion_weight", ""),
+        "consensus_weight": rule.get("consensus_weight", ""),
+        "positive_cues": _join_rule_items(rule.get("positive_cues", []), max_items=3),
+        "negative_indicators": _join_rule_items(rule.get("negative_indicators", []), max_items=2),
+    }
+
+
+def _diff_fields_for_rules(ruleset: list[dict]) -> list[str]:
+    """동일 schema/frame 묶음 안에서 실제로 값이 갈리는 필드를 찾는다."""
+    fields = [
+        "context", "profile", "severity_band", "value_anchor", "dimension",
+        "risk_weight", "distortion_weight", "consensus_weight",
+        "positive_cues", "negative_indicators", "expected_evidence_ko",
+        "axiom_penalty", "rule_strength", "intensity", "is_fired",
+    ]
+    diff_fields = []
+    for field in fields:
+        values = {_value_signature(r.get(field, "")) for r in ruleset}
+        if len(values) > 1:
+            diff_fields.append(field)
+    return diff_fields
+
+
+def _llm_mode_label(model_name: str, cloud_mode: bool) -> str:
+    """LLM 부가설명의 실행 환경 라벨을 만든다."""
+    model = (model_name or "").lower()
+    is_openai = model.startswith("gpt-") or "gpt" in model
+    if cloud_mode and is_openai:
+        return "Cloud OpenAI LLM"
+    if cloud_mode and not is_openai:
+        return "Cloud LLM"
+    if is_openai:
+        return "Local OpenAI LLM"
+    return "Local Hugging Face sLLM"
+
+
+def _rag_mode_label(rag_mode: str) -> str:
+    if rag_mode == "dense":
+        return "Dense RAG (sentence-transformers 의미 임베딩)"
+    return "Sparse RAG (Jaccard 어절/키워드 매칭)"
+
+
+def _preview_text(text: str, limit: int = 700) -> str:
+    text = str(text or "").strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _llm_referenced_rule_ids(sllm_meta: Optional[dict], ruleset: list[dict]) -> list[str]:
+    """LLM RAG prompt에 실제로 포함된 rule_id를 현재 묶음 기준으로 추린다."""
+    if not sllm_meta:
+        return []
+    rag_text = str(sllm_meta.get("rag_selected_rules", "") or "")
+    ids = []
+    for r in ruleset:
+        rid = str(r.get("rule_id", "") or "")
+        if rid and rid in rag_text:
+            ids.append(rid)
+    return ids
+
+
+def render_llm_supplement(sllm_meta: Optional[dict], cloud_mode: bool, group_rules: Optional[list[dict]] = None):
+    """LLM 추출 성공 시 후보 룰 해석 보조 설명을 표시한다.
+
+    Cloud에서는 OpenAI LLM 해설만, Local에서는 OpenAI LLM 또는 Hugging Face sLLM 해설을
+    실행 모델명에 따라 구분해 보여준다. 점수 계산에는 관여하지 않는다.
+    """
+    if not sllm_meta:
+        return
+
+    model = str(sllm_meta.get("model", "-") or "-")
+    mode_label = _llm_mode_label(model, cloud_mode)
+    rag_label = _rag_mode_label(str(sllm_meta.get("rag_mode", "") or ""))
+    reason = str(sllm_meta.get("reason", "") or "").strip()
+
+    if group_rules is None:
+        st.info(
+            f"🤖 **LLM 부가 해설 ({mode_label})**  \n"
+            f"모델: `{model}` · RAG 모드: {rag_label}  \n"
+            "이 설명은 후보 룰 발화를 이해하기 위한 보조 해설이며, 최종 점수는 OWL/JSON rule engine의 axiom 계산 결과를 따릅니다."
+        )
+        if reason:
+            st.markdown("**LLM 요약 해설**")
+            st.write(reason)
+        if sllm_meta.get("rag_selected_rules"):
+            with st.expander("LLM이 프롬프트에서 참고한 RAG 규칙", expanded=False):
+                st.code(str(sllm_meta.get("rag_selected_rules", "")), language="text")
+        if sllm_meta.get("raw_response"):
+            with st.expander("LLM 원문 응답", expanded=False):
+                st.code(str(sllm_meta.get("raw_response", "")), language="json")
+        return
+
+    referenced = _llm_referenced_rule_ids(sllm_meta, group_rules)
+    if referenced or reason:
+        st.markdown("**🤖 이 묶음에 대한 LLM 보조 해석**")
+        if referenced:
+            st.caption("LLM RAG prompt에 포함된 관련 rule_id: " + ", ".join(f"`{rid}`" for rid in referenced))
+        if reason:
+            st.caption(_preview_text(reason, 350))
+        st.caption("주의: 이 문장은 설명 보조층이며, 이 묶음의 penalty 계산을 추가로 바꾸지는 않습니다.")
+
+
+def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: Optional[dict] = None, cloud_mode: bool = True):
+    """후보 룰을 기계적 나열 대신 schema/frame별로 묶고, 룰별 차이를 명시한다."""
+    if not candidate_rules:
+        st.info("표시할 feature 기반 후보 규칙이 없습니다.")
+        return
+
+    st.caption(
+        "동일한 Schema/Frame 아래의 룰은 프레임 정의와 스키마 설명이 반복될 수 있습니다. "
+        "아래 표는 공통 설명은 한 번만 보여주고, rule_id별로 실제로 달라지는 context/profile/cue/severity/weight를 비교합니다."
+    )
+
+    render_llm_supplement(sllm_meta, cloud_mode)
+
+    overview_rows = []
+    grouped: dict[tuple[str, str, str], list[dict]] = {}
+    for r in candidate_rules:
+        key = (str(r.get("schema_id", "-")), str(r.get("target_frame", "-")), str(r.get("dimension", "-")))
+        grouped.setdefault(key, []).append(r)
+        overview_rows.append(_candidate_rule_row(r))
+
+    overview_df = pd.DataFrame(overview_rows)
+    if not overview_df.empty:
+        preferred_cols = [
+            "rule_id", "fired", "schema", "frame", "dimension", "context", "profile", "severity",
+            "value_anchor", "axiom_penalty", "strength", "intensity", "positive_cues", "negative_indicators",
+        ]
+        st.markdown("**후보 룰 요약표 — 룰별 차이 중심**")
+        st.dataframe(overview_df[[c for c in preferred_cols if c in overview_df.columns]], width="stretch", hide_index=True)
+
+    group_summary = []
+    for (schema_id, frame, dimension), ruleset in grouped.items():
+        penalties = [float(r.get("axiom_penalty", 0) or 0) for r in ruleset]
+        contexts = sorted({str(r.get("context", "-")) for r in ruleset})
+        profiles = sorted({str(r.get("profile", "-")) for r in ruleset})
+        severities = sorted({str(r.get("severity_band", "-")) for r in ruleset})
+        group_summary.append({
+            "schema/frame": f"{schema_id} / {frame}",
+            "dimension": dimension,
+            "rules": len(ruleset),
+            "fired": sum(1 for r in ruleset if bool(r.get("is_fired"))),
+            "penalty_range": f"{min(penalties):.1f} ~ {max(penalties):.1f}" if penalties else "-",
+            "contexts": ", ".join(contexts[:4]) + (f" 외 {len(contexts)-4}개" if len(contexts) > 4 else ""),
+            "profiles": ", ".join(profiles[:4]) + (f" 외 {len(profiles)-4}개" if len(profiles) > 4 else ""),
+            "severities": ", ".join(severities),
+        })
+    st.markdown("**Schema/Frame 묶음 요약**")
+    st.dataframe(pd.DataFrame(group_summary), width="stretch", hide_index=True)
+
+    sorted_groups = sorted(
+        grouped.items(),
+        key=lambda item: (sum(1 for r in item[1] if bool(r.get("is_fired"))), len(item[1])),
+        reverse=True,
+    )
+
+    for (schema_id, frame, dimension), ruleset in sorted_groups:
+        first = ruleset[0]
+        fired_count = sum(1 for r in ruleset if bool(r.get("is_fired")))
+        diff_fields = _diff_fields_for_rules(ruleset)
+        with st.expander(
+            f"🧩 {schema_id} / {frame} / {dimension} — {len(ruleset)}개 후보, fired {fired_count}개",
+            expanded=fired_count > 0,
+        ):
+            st.markdown("**공통 프레임/스키마 설명**")
+            if first.get("frame_definition_ko"):
+                st.write(f"- 프레임 정의: {first.get('frame_definition_ko')}")
+            if first.get("schema_description_ko"):
+                st.write(f"- 스키마 설명: {first.get('schema_description_ko')}")
+            if first.get("score_hint"):
+                hint = first.get("score_hint")
+                inc = _join_rule_items(hint.get("increase_when", []) if isinstance(hint, dict) else "", max_items=3)
+                dec = _join_rule_items(hint.get("decrease_when", []) if isinstance(hint, dict) else "", max_items=3)
+                if inc or dec:
+                    st.caption(f"점수 상승 조건: {inc}")
+                    st.caption(f"점수 완화 조건: {dec}")
+
+            render_llm_supplement(sllm_meta, cloud_mode, group_rules=ruleset)
+
+            st.markdown("**이 묶음에서 rule_id별로 달라지는 항목**")
+            if diff_fields:
+                st.write(" · ".join(f"`{field}`" for field in diff_fields))
+            else:
+                st.caption("이 묶음의 후보 룰은 표시 가능한 주요 필드가 거의 동일합니다.")
+
+            detail_df = pd.DataFrame([_candidate_rule_row(r) for r in ruleset])
+            detail_cols = [
+                "rule_id", "fired", "context", "profile", "severity", "value_anchor",
+                "axiom_penalty", "strength", "intensity", "risk_weight", "distortion_weight",
+                "consensus_weight", "positive_cues", "negative_indicators",
+            ]
+            st.dataframe(detail_df[[c for c in detail_cols if c in detail_df.columns]], width="stretch", hide_index=True)
+
+            st.caption(
+                "해석: 같은 schema/frame이면 프레임 정의는 동일하게 반복됩니다. "
+                "따라서 이 표에서는 각 rule_id가 어떤 맥락(context), 프로필(profile), 강도(severity), "
+                "cue/indicator 조합으로 달라지는지를 중심으로 읽으면 됩니다."
+            )
 
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["기사 분석", "수동 시뮬레이터", "규칙/온톨로지 탐색", "LLM 설정", "GitHub 배포 구조"])
@@ -1110,26 +1363,12 @@ with tab1:
             st.info("최종 graph audit에서 실제 axiom fired_rules가 없거나 graph audit이 불가능했습니다. 아래 후보 규칙은 보조 참고용입니다.")
 
         if not candidate_df.empty:
-            with st.expander("📋 Feature 기반 후보 규칙 + axiom penalty 메타", expanded=not fired_df.empty):
-                visible_df = candidate_df.drop(columns=["llm_instruction_ko", "positive_cues", "negative_indicators",
-                                                        "frame_definition_ko", "schema_description_ko", "expected_evidence_ko", "score_hint"], errors="ignore")
-                st.dataframe(visible_df, width="stretch", hide_index=True)
-                for r in result.get("candidate_rules", result.get("matched_rules", []))[:5]:
-                    st.markdown(f"**`{r.get('rule_id')}`** — {r.get('schema_id')} / {r.get('target_frame')}")
-                    rcols = st.columns(4)
-                    rcols[0].metric("is_fired", str(r.get("is_fired", False)))
-                    rcols[1].metric("axiom_penalty", r.get("axiom_penalty", 0))
-                    rcols[2].metric("rule_strength", r.get("rule_strength", 0))
-                    rcols[3].metric("intensity", r.get("intensity", 0))
-                    if r.get("frame_definition_ko"):
-                        st.caption(f"**프레임 정의**: {r['frame_definition_ko']}")
-                    if r.get("schema_description_ko"):
-                        st.caption(f"**스키마 설명**: {r['schema_description_ko']}")
-                    if r.get("expected_evidence_ko"):
-                        st.caption(f"**기대 증거**: {r['expected_evidence_ko']}")
-                    if r.get("score_hint"):
-                        st.caption(f"**score_hint**: {r['score_hint']}")
-                    st.divider()
+            with st.expander("📋 Feature 기반 후보 규칙 해설 — 룰별 차이 중심", expanded=not fired_df.empty):
+                render_candidate_rule_explanations(
+                    result.get("candidate_rules", result.get("matched_rules", [])),
+                    sllm_meta=sllm_meta,
+                    cloud_mode=cloud_mode,
+                )
 
         with st.expander("🧭 RuleSchema / Dimension 발화 heatmap", expanded=False):
             render_rule_heatmap(
