@@ -1287,6 +1287,10 @@ with tab1:
 
         if result.get("dimension_breakdown"):
             with st.expander("⚙️ 최종 axiom 차원별 페널티 분해 (graph audit 우선)", expanded=True):
+                st.caption(
+                    "이 표는 최종 axiom_distortion에 직접 반영되는 graph audit 기반 페널티 분해입니다. "
+                    "LLM의 Feature/RAG 추출 근거는 아래 `2. 지표 분해` 섹션에서 별도로 확인합니다."
+                )
                 bd = result["dimension_breakdown"]
                 bd_df = pd.DataFrame([
                     {
@@ -1301,27 +1305,31 @@ with tab1:
                 st.dataframe(bd_df, width="stretch", hide_index=True)
                 st.bar_chart(bd_df.set_index("dimension")["기여 distortion"])
 
-        if sllm_meta:
-            with st.expander("LLM 추출 근거 / 원문 응답"):
-                st.write("**모델**", sllm_meta.get("model"))
-                st.write(
-                    "**RAG 모드**",
-                    "Dense (의미 임베딩)" if sllm_meta.get("rag_mode") == "dense" else "Sparse (Jaccard 어절 겹침)",
-                )
-                st.write("**근거**", sllm_meta.get("reason", ""))
-                rag_rules = sllm_meta.get("rag_selected_rules", "")
-                if rag_rules:
-                    st.write("**RAG가 선택해 프롬프트에 주입한 규칙**")
-                    st.code(rag_rules, language="text")
-                st.write("**LLM 원문 응답**")
-                st.code(sllm_meta.get("raw_response", ""), language="json")
-
         st.subheader("2. 지표 분해")
         feature_df = pd.DataFrame(
             [{"dimension": k, "score": v, "weight": result["weights"].get(k, 0)} for k, v in result["features"].items()]
         )
         st.dataframe(feature_df, width="stretch", hide_index=True)
         st.bar_chart(feature_df.set_index("dimension")["score"])
+
+        if sllm_meta:
+            with st.expander("Feature/RAG LLM 추출 근거 / 원문 응답", expanded=False):
+                st.caption(
+                    "이 근거는 LLM이 기사 묶음과 RAG 후보 규칙을 바탕으로 5개 feature 값을 추출할 때 생성한 설명입니다. "
+                    "최종 axiom_distortion의 직접 근거는 3.5의 OWL graph audit / reasoning trace / actual fired_rules를 따릅니다."
+                )
+                st.write("**모델**", sllm_meta.get("model"))
+                st.write(
+                    "**RAG 모드**",
+                    "Dense (의미 임베딩)" if sllm_meta.get("rag_mode") == "dense" else "Sparse (Jaccard 어절 겹침)",
+                )
+                st.write("**Feature/RAG 추출 근거**", sllm_meta.get("reason", ""))
+                rag_rules = sllm_meta.get("rag_selected_rules", "")
+                if rag_rules:
+                    st.write("**RAG가 선택해 feature 추출 프롬프트에 주입한 후보 규칙**")
+                    st.code(rag_rules, language="text")
+                st.write("**LLM 원문 응답**")
+                st.code(sllm_meta.get("raw_response", ""), language="json")
 
         if result["series"]:
             st.subheader("3. 기사별 시계열 신호")
