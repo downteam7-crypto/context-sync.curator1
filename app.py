@@ -187,6 +187,17 @@ with st.sidebar:
         help="GPT 모델 이용 시 필요합니다. Streamlit Cloud Secrets 또는 사이드바 입력을 사용할 수 있습니다.",
     )
     sllm_max_tokens = st.slider("LLM max_new_tokens", 80, 500, 220)
+    use_owl_audit_llm_summary = st.toggle(
+        "OWL graph audit LLM 요약 생성",
+        value=False,
+        disabled=not use_sllm,
+        help=(
+            "LLM 추출기를 켠 경우에만 main graph audit 1건을 별도로 요약합니다. "
+            "기사 본문은 다시 보내지 않고 OWL reasoning trace / audit reasons / fired_rules 요약만 사용해 비용을 제한합니다."
+        ),
+    )
+    if not use_sllm:
+        st.caption("OWL graph audit LLM 요약은 LLM 추출기를 켰을 때만 선택할 수 있습니다.")
     st.caption("2차 배포 기준: Cloud에서는 OpenAI API 기반 추출까지만 권장합니다. Dense RAG/sentence-transformers/로컬 sLLM은 로컬 실행 옵션입니다.")
 
     st.divider()
@@ -599,29 +610,203 @@ def render_llm_supplement(sllm_meta: Optional[dict], cloud_mode: bool, group_rul
 
     if group_rules is None:
         st.info(
-            f"🤖 **LLM 부가 해설 ({mode_label})**  \n"
+            f"🤖 **Feature/RAG 기반 LLM 보조 해설 ({mode_label})**  \n"
             f"모델: `{model}` · RAG 모드: {rag_label}  \n"
-            "이 설명은 후보 룰 발화를 이해하기 위한 보조 해설이며, 최종 점수는 OWL/JSON rule engine의 axiom 계산 결과를 따릅니다."
+            "이 설명은 LLM이 기사 묶음과 RAG 후보 규칙을 바탕으로 5개 feature를 추출할 때 생성한 보조 설명입니다. "
+            "최종 axiom_distortion의 직접 근거는 위 3.5의 OWL graph audit / reasoning trace / actual fired_rules를 따릅니다."
         )
         if reason:
-            st.markdown("**LLM 요약 해설**")
+            st.markdown("**Feature/RAG LLM 요약 해설**")
             st.write(reason)
         if sllm_meta.get("rag_selected_rules"):
-            with st.expander("LLM이 프롬프트에서 참고한 RAG 규칙", expanded=False):
+            with st.expander("Feature/RAG LLM이 프롬프트에서 참고한 RAG 규칙", expanded=False):
                 st.code(str(sllm_meta.get("rag_selected_rules", "")), language="text")
         if sllm_meta.get("raw_response"):
-            with st.expander("LLM 원문 응답", expanded=False):
+            with st.expander("Feature/RAG LLM 원문 응답", expanded=False):
                 st.code(str(sllm_meta.get("raw_response", "")), language="json")
         return
 
     referenced = _llm_referenced_rule_ids(sllm_meta, group_rules)
     if referenced or reason:
-        st.markdown("**🤖 이 묶음에 대한 LLM 보조 해석**")
+        st.markdown("**🤖 이 후보 룰 묶음에 대한 Feature/RAG 기반 LLM 보조 해석**")
         if referenced:
             st.caption("LLM RAG prompt에 포함된 관련 rule_id: " + ", ".join(f"`{rid}`" for rid in referenced))
         if reason:
             st.caption(_preview_text(reason, 350))
-        st.caption("주의: 이 문장은 설명 보조층이며, 이 묶음의 penalty 계산을 추가로 바꾸지는 않습니다.")
+        st.caption("주의: 이 문장은 LLM feature extraction 과정에서 생성된 설명입니다. OWL graph audit의 독립 추론 결과가 아니며, penalty 계산을 추가로 바꾸지 않습니다.")
+
+
+def _safe_json_extract(text: str) -> dict:
+    """LLM 응답에서 JSON 객체를 느슨하게 추출한다. 실패하면 빈 dict."""
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL | re.IGNORECASE)
+    if fence:
+        try:
+            return json.loads(fence.group(1))
+        except Exception:
+            pass
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(raw[start:end + 1])
+        except Exception:
+            pass
+    return {}
+
+
+def _compact_graph_audit_for_llm(audit: dict, max_trace_rows: int = 12, max_rules: int = 10, max_reasons: int = 8) -> dict:
+    """기사 본문 없이 OWL graph audit 결과만 LLM 요약용으로 압축한다."""
+    details = audit.get("details", {}) or {}
+    past = details.get("past", {}) or {}
+    present = details.get("present", {}) or {}
+    trace = build_reasoning_trace(audit) or []
+    fired_rules = audit.get("fired_rules", []) or []
+    return {
+        "group_key": audit.get("_group_key", "-"),
+        "article_count": audit.get("article_count", 0),
+        "past_article": {
+            "title": (audit.get("past_article", {}) or {}).get("title", ""),
+            "date": (audit.get("past_article", {}) or {}).get("date", ""),
+        },
+        "present_article": {
+            "title": (audit.get("present_article", {}) or {}).get("title", ""),
+            "date": (audit.get("present_article", {}) or {}).get("date", ""),
+        },
+        "past_signal": {
+            "promoted_value": past.get("promoted_value"),
+            "detected_frame": past.get("detected_frame"),
+            "stance_polarity": past.get("stance_polarity"),
+        },
+        "present_signal": {
+            "promoted_value": present.get("promoted_value"),
+            "detected_frame": present.get("detected_frame"),
+            "stance_polarity": present.get("stance_polarity"),
+        },
+        "scores": {
+            "logic_score": audit.get("logic_score"),
+            "weighted_distortion": audit.get("weighted_distortion"),
+            "coherence_score": audit.get("score"),
+            "verdict": audit.get("anchor_verdict"),
+        },
+        "dimension_breakdown": audit.get("dimension_breakdown", {}),
+        "dimension_weights": audit.get("dimension_weights", {}),
+        "explanation_mitigation": details.get("explanation_mitigation"),
+        "reasoning_trace": trace[:max_trace_rows],
+        "audit_reasons": [str(r) for r in (audit.get("reasons", []) or [])[:max_reasons]],
+        "fired_rules": [
+            {
+                "rule_id": r.get("rule_id"),
+                "schema_id": r.get("schema_id"),
+                "target_frame": r.get("target_frame"),
+                "dimension": r.get("dimension"),
+                "axiom_penalty": r.get("axiom_penalty"),
+                "rule_strength": r.get("rule_strength"),
+                "intensity": r.get("intensity"),
+            }
+            for r in fired_rules[:max_rules]
+        ],
+    }
+
+
+def generate_owl_graph_audit_llm_summary(
+    audit: dict,
+    model_name: str,
+    api_key: str = "",
+    max_tokens: int = 420,
+    temperature: float = 0.1,
+    cloud_mode: bool = True,
+) -> str:
+    """main OWL graph audit 1건을 LLM으로 요약한다.
+
+    비용 통제를 위해 기사 본문은 다시 보내지 않고, graph audit의 구조화 결과만 전달한다.
+    OpenAI GPT 계열은 Cloud/Local 모두 지원하고, Hugging Face sLLM은 Local에서만 시도한다.
+    """
+    model = (model_name or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    is_openai = model.lower().startswith("gpt-") or "gpt" in model.lower()
+    audit_payload = _compact_graph_audit_for_llm(audit)
+    prompt = (
+        "아래는 뉴스 시계열 분석기의 OWL graph audit 결과입니다. "
+        "기사 본문을 새로 해석하지 말고, 제공된 reasoning_trace / audit_reasons / fired_rules / dimension_breakdown 안의 정보만 사용하세요.\n"
+        "사람이 읽기 쉬운 한국어 요약을 JSON 하나로 출력하세요. 새 판단이나 추측을 추가하지 마세요.\n\n"
+        "출력 형식:\n"
+        "{\n"
+        '  "summary": "3~5문장 요약",\n'
+        '  "key_points": ["핵심 근거 1", "핵심 근거 2", "핵심 근거 3"],\n'
+        '  "caution": "이 요약은 계산에 관여하지 않는 설명 보조층이라는 주의 문구"\n'
+        "}\n\n"
+        "OWL graph audit JSON:\n"
+        + json.dumps(audit_payload, ensure_ascii=False, indent=2)
+    )
+
+    if is_openai:
+        active_api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        if not active_api_key:
+            raise ValueError("OWL graph audit 요약을 생성하려면 OpenAI API Key가 필요합니다.")
+        import requests
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {active_api_key}",
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You summarize deterministic OWL graph audit traces. "
+                        "Return exactly one valid JSON object in Korean. Do not add facts outside the supplied audit."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=60,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"OpenAI API 호출 실패 (상태 코드 {response.status_code}): {response.text}")
+        raw = response.json()["choices"][0]["message"]["content"]
+    else:
+        if cloud_mode:
+            raise RuntimeError("Cloud 배포판에서는 OWL graph audit 요약에 OpenAI GPT 계열 모델만 지원합니다.")
+        try:
+            from transformers import pipeline
+        except Exception as e:
+            raise RuntimeError("로컬 sLLM 요약을 사용하려면 `pip install -r requirements-sllm.txt`가 필요합니다.") from e
+        generator = pipeline("text-generation", model=model, tokenizer=model, trust_remote_code=True)
+        outputs = generator(
+            prompt,
+            max_new_tokens=max_tokens,
+            do_sample=temperature > 0,
+            temperature=temperature if temperature > 0 else None,
+            return_full_text=False,
+        )
+        raw = outputs[0].get("generated_text", "") if outputs else ""
+
+    parsed = _safe_json_extract(raw)
+    if parsed:
+        parts = []
+        if parsed.get("summary"):
+            parts.append(str(parsed.get("summary")))
+        key_points = parsed.get("key_points") or []
+        if isinstance(key_points, list) and key_points:
+            parts.append("\n".join(f"- {p}" for p in key_points[:5]))
+        if parsed.get("caution"):
+            parts.append(f"\n주의: {parsed.get('caution')}")
+        return "\n\n".join(p for p in parts if p).strip() or json.dumps(parsed, ensure_ascii=False, indent=2)
+    return str(raw or "").strip()
 
 
 def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: Optional[dict] = None, cloud_mode: bool = True):
@@ -1252,6 +1437,26 @@ with tab1:
                             st.write(f"• detected_frame: `{pres_d.get('detected_frame')}`")
                             st.write(f"• stance_polarity: `{pres_d.get('stance_polarity')}`")
 
+                        if idx == 0 and use_owl_audit_llm_summary:
+                            with st.expander("🤖 OWL graph audit 전용 LLM 요약해설", expanded=True):
+                                st.caption(
+                                    "이 요약은 3.5의 OWL reasoning trace / audit reasons / actual fired_rules를 사람이 읽기 쉽게 풀어쓴 것입니다. "
+                                    "기사 본문을 다시 해석하지 않으며, 최종 점수 계산에는 관여하지 않습니다."
+                                )
+                                try:
+                                    with st.spinner("main OWL graph audit를 LLM으로 요약하는 중입니다..."):
+                                        audit_summary_text = generate_owl_graph_audit_llm_summary(
+                                            audit,
+                                            model_name=sllm_model.strip() or DEFAULT_MODEL,
+                                            api_key=openai_api_key,
+                                            max_tokens=min(max(int(sllm_max_tokens), 220), 500),
+                                            cloud_mode=cloud_mode,
+                                        )
+                                    st.write(audit_summary_text)
+                                except Exception as exc:
+                                    st.warning(f"OWL graph audit LLM 요약 생성 실패: {exc}")
+                                    st.caption("요약 생성에 실패해도 graph audit 계산과 최종 점수에는 영향이 없습니다.")
+
                         mitigation = audit.get("details", {}).get("explanation_mitigation")
                         if mitigation:
                             factor = mitigation.get("mitigation_factor", 1.0)
@@ -1356,7 +1561,8 @@ with tab1:
         st.caption(
             "위 3.5/3.6 섹션은 최종 axiom 점수에 직접 기여한 actual fired_rules를 graph audit 맥락에서 보여줍니다. "
             "이 섹션은 같은 룰을 다시 나열하기보다, feature 기반 후보 규칙이 어떤 schema/frame/context/cue 차이로 갈리는지와 "
-            "차원별 발화 분포를 해설하는 보조 영역입니다."
+            "차원별 발화 분포를 해설하는 보조 영역입니다. LLM 요약이 표시되는 경우에도 이는 Feature/RAG 추출 과정의 보조 설명이며, "
+            "OWL graph audit 전용 요약은 3.5의 별도 토글/expander에서 분리해 표시합니다."
         )
         fired_df = pd.DataFrame(result.get("axiom_fired_rules", []))
         candidate_df = pd.DataFrame(result.get("candidate_rules", result.get("matched_rules", [])))
