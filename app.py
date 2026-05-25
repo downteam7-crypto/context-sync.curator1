@@ -891,7 +891,8 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
             f"🧩 {schema_id} / {frame} / {dimension} — {len(ruleset)}개 후보, fired {fired_count}개",
             expanded=fired_count > 0,
         ):
-            st.markdown("**공통 프레임/스키마 설명**")
+            st.markdown("**공통 프레임/스키마 설명 — feature 기반 후보 룰 기준**")
+            st.caption("주의: 이 설명은 feature 기반 후보 룰의 프레임 정의입니다. 최종 점수에 직접 반영된 룰은 3.5 graph audit에서 확인하세요. 특정 프레임 그룹이 표시된 것은 기사 묶음이 오직 해당 프레임에만 소속된다는 단일 분류가 아니라, 다중 신호(Multi-signal) 중 하나로 감지되었음을 의미합니다.")
             if first.get("frame_definition_ko"):
                 st.write(f"- 프레임 정의: {first.get('frame_definition_ko')}")
             if first.get("schema_description_ko"):
@@ -1592,6 +1593,11 @@ with tab1:
             "이 섹션은 같은 룰을 다시 나열하기보다, feature 기반 후보 규칙이 어떤 schema/frame/context/cue 차이로 갈리는지와 "
             "차원별 발화 분포를 해설하는 보조 영역입니다. LLM 요약이 표시되는 경우에도 이는 Feature/RAG 추출 과정의 보조 설명이며, "
             "OWL graph audit 전용 요약은 3.5의 별도 토글/expander에서 분리해 표시합니다."
+        )
+        st.info(
+            "💡 **룰 적용 체계 가이드: Actual Fired Rules vs Feature 후보 규칙**\n\n"
+            "* **Actual Axiom Fired Rules**: 최종 `axiom_distortion`에 직접 반영되어 점수에 기여한 규칙입니다. 상세 추론 과정과 논리 사슬은 위 `3.5. OWL 그래프 추론 및 actual fired_rules`에서 확인할 수 있습니다.\n"
+            "* **Feature-based Candidate Rules**: 예측된 지표(features) 조건 및 활성도 임계값을 기반으로 도출된 보조 후보 규칙입니다. 기사 묶음이 특정 프레임(예: EmotionalAppeal)에만 '독점적으로' 속한다는 뜻이 아니라, 기사에서 감지된 다중 신호(Multi-signal) 중 해당 프레임 신호가 유의미하게 포착되었음을 나타냅니다."
         )
         render_feature_rag_rule_selection_note(scope="candidate")
         fired_df = pd.DataFrame(result.get("axiom_fired_rules", []))
