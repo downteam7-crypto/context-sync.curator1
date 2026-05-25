@@ -576,6 +576,24 @@ def _rag_mode_label(rag_mode: str) -> str:
     return "Sparse RAG (Jaccard 어절/키워드 매칭)"
 
 
+def render_feature_rag_rule_selection_note(scope: str = "feature"):
+    """Feature/RAG 설명에서 두 종류의 룰 선택 공리를 명시한다."""
+    if scope == "feature":
+        st.caption(
+            "여기서 표시되는 RAG 주입 규칙은 LLM이 5개 feature 값을 추출하기 전에 참고한 검색 결과입니다. "
+            "선택 기준은 기사 텍스트와 룰 텍스트의 유사도(Sparse Jaccard 또는 Dense cosine similarity)이며, "
+            "해당 룰이 실제로 fired 되었는지나 feature activation 임계치를 통과했는지는 아직 반영하지 않습니다. "
+            "따라서 3.7의 feature 기반 후보 규칙 목록과 완전히 일치하지 않을 수 있습니다."
+        )
+    else:
+        st.caption(
+            "주의: 이 후보 룰 목록은 RAG 검색 결과가 아닙니다. 5개 feature 값이 산출된 뒤, "
+            "dimension score, rule weight, severity 등을 조합한 feature activation 임계치를 통과한 규칙입니다. "
+            "반면 2. 지표 분해의 RAG 주입 규칙은 LLM feature 추출 전에 텍스트 유사도로 고른 참고 규칙입니다. "
+            "두 목록은 같은 Feature/RAG 계열 보조층에 속하지만, 룰 선택 공리가 다르므로 일부 차이가 나는 것이 정상입니다."
+        )
+
+
 def _preview_text(text: str, limit: int = 700) -> str:
     text = str(text or "").strip()
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
@@ -612,9 +630,10 @@ def render_llm_supplement(sllm_meta: Optional[dict], cloud_mode: bool, group_rul
         st.info(
             f"🤖 **Feature/RAG 기반 LLM 보조 해설 ({mode_label})**  \n"
             f"모델: `{model}` · RAG 모드: {rag_label}  \n"
-            "이 설명은 LLM이 기사 묶음과 RAG 후보 규칙을 바탕으로 5개 feature를 추출할 때 생성한 보조 설명입니다. "
+            "이 설명은 LLM이 기사 묶음과 RAG 주입 규칙을 바탕으로 5개 feature를 추출할 때 생성한 보조 설명입니다. "
             "최종 axiom_distortion의 직접 근거는 위 3.5의 OWL graph audit / reasoning trace / actual fired_rules를 따릅니다."
         )
+        render_feature_rag_rule_selection_note(scope="feature")
         if reason:
             st.markdown("**Feature/RAG LLM 요약 해설**")
             st.write(reason)
@@ -634,6 +653,7 @@ def render_llm_supplement(sllm_meta: Optional[dict], cloud_mode: bool, group_rul
         if reason:
             st.caption(_preview_text(reason, 350))
         st.caption("주의: 이 문장은 LLM feature extraction 과정에서 생성된 설명입니다. OWL graph audit의 독립 추론 결과가 아니며, penalty 계산을 추가로 바꾸지 않습니다.")
+        render_feature_rag_rule_selection_note(scope="candidate")
 
 
 def _safe_json_extract(text: str) -> dict:
@@ -1315,9 +1335,10 @@ with tab1:
         if sllm_meta:
             with st.expander("Feature/RAG LLM 추출 근거 / 원문 응답", expanded=False):
                 st.caption(
-                    "이 근거는 LLM이 기사 묶음과 RAG 후보 규칙을 바탕으로 5개 feature 값을 추출할 때 생성한 설명입니다. "
+                    "이 근거는 LLM이 기사 묶음과 RAG 주입 규칙을 바탕으로 5개 feature 값을 추출할 때 생성한 설명입니다. "
                     "최종 axiom_distortion의 직접 근거는 3.5의 OWL graph audit / reasoning trace / actual fired_rules를 따릅니다."
                 )
+                render_feature_rag_rule_selection_note(scope="feature")
                 st.write("**모델**", sllm_meta.get("model"))
                 st.write(
                     "**RAG 모드**",
@@ -1572,6 +1593,7 @@ with tab1:
             "차원별 발화 분포를 해설하는 보조 영역입니다. LLM 요약이 표시되는 경우에도 이는 Feature/RAG 추출 과정의 보조 설명이며, "
             "OWL graph audit 전용 요약은 3.5의 별도 토글/expander에서 분리해 표시합니다."
         )
+        render_feature_rag_rule_selection_note(scope="candidate")
         fired_df = pd.DataFrame(result.get("axiom_fired_rules", []))
         candidate_df = pd.DataFrame(result.get("candidate_rules", result.get("matched_rules", [])))
 
