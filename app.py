@@ -576,24 +576,6 @@ def _rag_mode_label(rag_mode: str) -> str:
     return "Sparse RAG (Jaccard 어절/키워드 매칭)"
 
 
-def render_feature_rag_rule_selection_note(scope: str = "feature"):
-    """Feature/RAG 설명에서 두 종류의 룰 선택 공리를 명시한다."""
-    if scope == "feature":
-        st.caption(
-            "여기서 표시되는 RAG 주입 규칙은 LLM이 5개 feature 값을 추출하기 전에 참고한 검색 결과입니다. "
-            "선택 기준은 기사 텍스트와 룰 텍스트의 유사도(Sparse Jaccard 또는 Dense cosine similarity)이며, "
-            "해당 룰이 실제로 fired 되었는지나 feature activation 임계치를 통과했는지는 아직 반영하지 않습니다. "
-            "따라서 3.7의 feature 기반 후보 규칙 목록과 완전히 일치하지 않을 수 있습니다."
-        )
-    else:
-        st.caption(
-            "주의: 이 후보 룰 목록은 RAG 검색 결과가 아닙니다. 5개 feature 값이 산출된 뒤, "
-            "dimension score, rule weight, severity 등을 조합한 feature activation 임계치를 통과한 규칙입니다. "
-            "반면 2. 지표 분해의 RAG 주입 규칙은 LLM feature 추출 전에 텍스트 유사도로 고른 참고 규칙입니다. "
-            "두 목록은 같은 Feature/RAG 계열 보조층에 속하지만, 룰 선택 공리가 다르므로 일부 차이가 나는 것이 정상입니다."
-        )
-
-
 def _preview_text(text: str, limit: int = 700) -> str:
     text = str(text or "").strip()
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
@@ -613,10 +595,10 @@ def _llm_referenced_rule_ids(sllm_meta: Optional[dict], ruleset: list[dict]) -> 
 
 
 def render_llm_supplement(sllm_meta: Optional[dict], cloud_mode: bool, group_rules: Optional[list[dict]] = None):
-    """LLM 추출 성공 시 후보 룰 해석 보조 설명을 표시한다.
+    """LLM 추출 성공 시 Feature/RAG 계열 보조 설명을 표시한다.
 
-    Cloud에서는 OpenAI LLM 해설만, Local에서는 OpenAI LLM 또는 Hugging Face sLLM 해설을
-    실행 모델명에 따라 구분해 보여준다. 점수 계산에는 관여하지 않는다.
+    주의: 이 설명은 feature 추출 프롬프트의 reason을 재표시하는 것이며,
+    3.7 후보 규칙의 activation 기준이나 3.5 graph audit 직접 근거가 아니다.
     """
     if not sllm_meta:
         return
@@ -627,34 +609,59 @@ def render_llm_supplement(sllm_meta: Optional[dict], cloud_mode: bool, group_rul
     reason = str(sllm_meta.get("reason", "") or "").strip()
 
     if group_rules is None:
+        st.markdown("##### A. Feature/RAG LLM feature 추출 근거")
         st.info(
             f"🤖 **Feature/RAG 기반 LLM 보조 해설 ({mode_label})**  \n"
             f"모델: `{model}` · RAG 모드: {rag_label}  \n"
-            "이 설명은 LLM이 기사 묶음과 RAG 주입 규칙을 바탕으로 5개 feature를 추출할 때 생성한 보조 설명입니다. "
-            "최종 axiom_distortion의 직접 근거는 위 3.5의 OWL graph audit / reasoning trace / actual fired_rules를 따릅니다."
+            "이 영역은 LLM이 기사 묶음과 RAG 주입 규칙을 참고해 5개 feature 값을 추출할 때 만든 `reason`입니다. "
+            "아래 B의 `candidate_rules` 선택 기준과는 다르며, 최종 axiom_distortion의 직접 근거는 3.5의 OWL graph audit / reasoning trace / actual fired_rules입니다."
         )
-        render_feature_rag_rule_selection_note(scope="feature")
+        st.caption(
+            "정리: A는 feature 추출 전 단계의 텍스트 유사도 기반 참고 규칙과 LLM reason을 보여주고, "
+            "B는 feature 값이 산출된 뒤 activation 임계치를 통과한 후보 룰을 보여줍니다."
+        )
         if reason:
             st.markdown("**Feature/RAG LLM 요약 해설**")
             st.write(reason)
         if sllm_meta.get("rag_selected_rules"):
-            with st.expander("Feature/RAG LLM이 프롬프트에서 참고한 RAG 규칙", expanded=False):
+            with st.expander("A-1. LLM feature 추출 프롬프트에 주입된 RAG 규칙", expanded=False):
+                st.caption(
+                    "이 목록은 기사 텍스트와 룰 텍스트의 유사도(Sparse Jaccard 또는 Dense cosine similarity)로 고른 참고 규칙입니다. "
+                    "아직 실제 fired 여부나 feature activation 임계치는 반영되지 않았습니다."
+                )
                 st.code(str(sllm_meta.get("rag_selected_rules", "")), language="text")
         if sllm_meta.get("raw_response"):
-            with st.expander("Feature/RAG LLM 원문 응답", expanded=False):
+            with st.expander("A-2. Feature/RAG LLM 원문 응답", expanded=False):
                 st.code(str(sllm_meta.get("raw_response", "")), language="json")
         return
 
     referenced = _llm_referenced_rule_ids(sllm_meta, group_rules)
     if referenced or reason:
-        st.markdown("**🤖 이 후보 룰 묶음에 대한 Feature/RAG 기반 LLM 보조 해석**")
+        st.markdown("**🤖 Feature/RAG LLM reason 참고 — 이 후보 묶음의 직접 activation 근거는 아님**")
         if referenced:
-            st.caption("LLM RAG prompt에 포함된 관련 rule_id: " + ", ".join(f"`{rid}`" for rid in referenced))
+            st.caption("LLM feature 추출 프롬프트에 포함된 관련 rule_id: " + ", ".join(f"`{rid}`" for rid in referenced))
         if reason:
             st.caption(_preview_text(reason, 350))
-        st.caption("주의: 이 문장은 LLM feature extraction 과정에서 생성된 설명입니다. OWL graph audit의 독립 추론 결과가 아니며, penalty 계산을 추가로 바꾸지 않습니다.")
-        render_feature_rag_rule_selection_note(scope="candidate")
+        st.caption(
+            "주의: 이 문장은 LLM feature extraction 과정에서 생성된 설명입니다. "
+            "해당 schema/frame 후보 묶음이 선택된 직접 기준은 아래의 context/profile/cue/weight 및 feature activation 조건이며, "
+            "OWL graph audit의 독립 추론 결과도 아닙니다."
+        )
 
+
+def render_feature_activation_rule_selection_note():
+    """3.7 candidate_rules가 RAG 주입 규칙과 다른 공리로 선택됨을 설명한다."""
+    st.markdown("##### B. Feature activation 기반 후보 규칙 선택 공리")
+    st.warning(
+        "아래 후보 규칙 표는 A의 RAG 주입 규칙 목록이 아닙니다. "
+        "5개 feature 값이 산출된 뒤, dimension score · rule weight · severity · activation threshold를 조합해 "
+        "유의미하다고 판단된 `candidate_rules`만 보여주는 보조 해설 영역입니다."
+    )
+    st.caption(
+        "따라서 A의 RAG 주입 규칙과 B의 후보 규칙은 일부 겹칠 수 있지만 완전히 일치할 필요는 없습니다. "
+        "또한 `S06 / EmotionalAppeal` 같은 묶음이 보인다는 것은 기사 묶음이 그 프레임에 '오직' 속한다는 뜻이 아니라, "
+        "여러 가능한 schema/frame 신호 중 해당 계열 신호가 유의미하게 감지되었다는 뜻입니다."
+    )
 
 def _safe_json_extract(text: str) -> dict:
     """LLM 응답에서 JSON 객체를 느슨하게 추출한다. 실패하면 빈 dict."""
@@ -836,11 +843,12 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
         return
 
     st.caption(
-        "동일한 Schema/Frame 아래의 룰은 프레임 정의와 스키마 설명이 반복될 수 있습니다. "
-        "아래 표는 공통 설명은 한 번만 보여주고, rule_id별로 실제로 달라지는 context/profile/cue/severity/weight를 비교합니다."
+        "이 영역은 최종 axiom 점수 자체를 다시 계산하는 곳이 아니라, 룰 설명을 읽기 쉽게 정리하는 보조 영역입니다. "
+        "actual fired_rules는 3.5의 graph audit 맥락에서, feature 기반 candidate_rules는 아래 B의 activation 기준에서 읽어야 합니다."
     )
 
     render_llm_supplement(sllm_meta, cloud_mode)
+    render_feature_activation_rule_selection_note()
 
     overview_rows = []
     grouped: dict[tuple[str, str, str], list[dict]] = {}
@@ -855,7 +863,7 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
             "rule_id", "fired", "schema", "frame", "dimension", "context", "profile", "severity",
             "value_anchor", "axiom_penalty", "strength", "intensity", "positive_cues", "negative_indicators",
         ]
-        st.markdown("**후보 룰 요약표 — 룰별 차이 중심**")
+        st.markdown("**B-1. 후보 룰 요약표 — feature activation 기준, 룰별 차이 중심**")
         st.dataframe(overview_df[[c for c in preferred_cols if c in overview_df.columns]], width="stretch", hide_index=True)
 
     group_summary = []
@@ -874,7 +882,7 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
             "profiles": ", ".join(profiles[:4]) + (f" 외 {len(profiles)-4}개" if len(profiles) > 4 else ""),
             "severities": ", ".join(severities),
         })
-    st.markdown("**Schema/Frame 묶음 요약**")
+    st.markdown("**B-2. Schema/Frame 묶음 요약 — 다중 프레임 신호 요약**")
     st.dataframe(pd.DataFrame(group_summary), width="stretch", hide_index=True)
 
     sorted_groups = sorted(
@@ -891,12 +899,15 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
             f"🧩 {schema_id} / {frame} / {dimension} — {len(ruleset)}개 후보, fired {fired_count}개",
             expanded=fired_count > 0,
         ):
-            st.markdown("**공통 프레임/스키마 설명 — feature 기반 후보 룰 기준**")
-            st.caption("주의: 이 설명은 feature 기반 후보 룰의 프레임 정의입니다. 최종 점수에 직접 반영된 룰은 3.5 graph audit에서 확인하세요. 특정 프레임 그룹이 표시된 것은 기사 묶음이 오직 해당 프레임에만 소속된다는 단일 분류가 아니라, 다중 신호(Multi-signal) 중 하나로 감지되었음을 의미합니다.")
+            st.markdown("**B-3. 공통 프레임/스키마 설명 — feature activation 후보 룰 기준**")
             if first.get("frame_definition_ko"):
                 st.write(f"- 프레임 정의: {first.get('frame_definition_ko')}")
             if first.get("schema_description_ko"):
                 st.write(f"- 스키마 설명: {first.get('schema_description_ko')}")
+            st.caption(
+                "주의: 이 설명은 해당 schema/frame 계열의 후보 룰 정의입니다. 기사 전체를 단일 프레임으로 분류한다는 뜻이 아니며, "
+                "최종 axiom_distortion에 직접 기여한 actual fired_rules의 graph audit 설명은 3.5에서 확인합니다."
+            )
             if first.get("score_hint"):
                 hint = first.get("score_hint")
                 inc = _join_rule_items(hint.get("increase_when", []) if isinstance(hint, dict) else "", max_items=3)
@@ -1336,10 +1347,9 @@ with tab1:
         if sllm_meta:
             with st.expander("Feature/RAG LLM 추출 근거 / 원문 응답", expanded=False):
                 st.caption(
-                    "이 근거는 LLM이 기사 묶음과 RAG 주입 규칙을 바탕으로 5개 feature 값을 추출할 때 생성한 설명입니다. "
+                    "이 근거는 LLM이 기사 묶음과 RAG 후보 규칙을 바탕으로 5개 feature 값을 추출할 때 생성한 설명입니다. "
                     "최종 axiom_distortion의 직접 근거는 3.5의 OWL graph audit / reasoning trace / actual fired_rules를 따릅니다."
                 )
-                render_feature_rag_rule_selection_note(scope="feature")
                 st.write("**모델**", sllm_meta.get("model"))
                 st.write(
                     "**RAG 모드**",
@@ -1587,19 +1597,14 @@ with tab1:
                 for reason in audit.get("reasons", []):
                     st.markdown(f"- {reason}")
 
-        st.subheader("3.7. 후보 규칙 해설 및 RuleSchema 발화 분포")
+        st.subheader("3.7. 룰 해설: Feature/RAG 추출 근거와 후보 규칙 분리")
         st.caption(
             "위 3.5/3.6 섹션은 최종 axiom 점수에 직접 기여한 actual fired_rules를 graph audit 맥락에서 보여줍니다. "
-            "이 섹션은 같은 룰을 다시 나열하기보다, feature 기반 후보 규칙이 어떤 schema/frame/context/cue 차이로 갈리는지와 "
-            "차원별 발화 분포를 해설하는 보조 영역입니다. LLM 요약이 표시되는 경우에도 이는 Feature/RAG 추출 과정의 보조 설명이며, "
-            "OWL graph audit 전용 요약은 3.5의 별도 토글/expander에서 분리해 표시합니다."
+            "이 3.7 섹션은 두 보조층을 분리해서 읽도록 정리합니다. "
+            "A는 LLM이 feature를 추출할 때 참고한 RAG 주입 규칙과 reason이고, "
+            "B는 feature 값 산출 뒤 activation 기준을 통과한 candidate_rules입니다. "
+            "둘은 같은 Feature/RAG 계열 보조층에 속하지만 룰 선택 공리가 다르므로 목록이 달라질 수 있습니다."
         )
-        st.info(
-            "💡 **룰 적용 체계 가이드: Actual Fired Rules vs Feature 후보 규칙**\n\n"
-            "* **Actual Axiom Fired Rules**: 최종 `axiom_distortion`에 직접 반영되어 점수에 기여한 규칙입니다. 상세 추론 과정과 논리 사슬은 위 `3.5. OWL 그래프 추론 및 actual fired_rules`에서 확인할 수 있습니다.\n"
-            "* **Feature-based Candidate Rules**: 예측된 지표(features) 조건 및 활성도 임계값을 기반으로 도출된 보조 후보 규칙입니다. 기사 묶음이 특정 프레임(예: EmotionalAppeal)에만 '독점적으로' 속한다는 뜻이 아니라, 기사에서 감지된 다중 신호(Multi-signal) 중 해당 프레임 신호가 유의미하게 포착되었음을 나타냅니다."
-        )
-        render_feature_rag_rule_selection_note(scope="candidate")
         fired_df = pd.DataFrame(result.get("axiom_fired_rules", []))
         candidate_df = pd.DataFrame(result.get("candidate_rules", result.get("matched_rules", [])))
 
@@ -1624,7 +1629,7 @@ with tab1:
             )
 
         if not candidate_df.empty:
-            with st.expander("📋 Feature 기반 후보 규칙 해설 — 룰별 차이 중심", expanded=True):
+            with st.expander("📋 A/B 분리 해설 — Feature/RAG LLM 근거와 candidate_rules", expanded=True):
                 render_candidate_rule_explanations(
                     result.get("candidate_rules", result.get("matched_rules", [])),
                     sllm_meta=sllm_meta,
