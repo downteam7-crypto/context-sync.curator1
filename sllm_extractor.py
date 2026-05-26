@@ -3,9 +3,75 @@ from __future__ import annotations
 import json
 import os
 import re
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 DIMENSIONS = ["temporal_shift", "frame_effect", "context_omission", "consensus_deviation", "evidence_quality"]
+
+# ── 클라우드용 Dense RAG: OpenAI 임베딩 ──────────────────────────────
+# 로컬 ko-sroberta(dense_model)가 없을 때, OpenAI /v1/embeddings로 Dense를 대체한다.
+# 주의: 이 임베딩은 ko-sroberta와 *다른 의미공간*이므로, 반환 dict의 dense_engine으로
+#       어느 엔진인지 구분 표시한다(출처 정직성). 두 엔진은 cosine 분포·임계값이 다르다.
+DEFAULT_OPENAI_EMBED_MODEL = "text-embedding-3-small"
+_OPENAI_EMBED_URL = "https://api.openai.com/v1/embeddings"
+_OPENAI_EMBED_BATCH = 128
+
+
+def openai_embed_texts(
+    texts: List[str],
+    api_key: str = "",
+    model: str = DEFAULT_OPENAI_EMBED_MODEL,
+    timeout: int = 60,
+) -> Optional[List[List[float]]]:
+    """텍스트 리스트 → 임베딩 벡터 리스트. 키 없거나 실패 시 None(→ Sparse fallback)."""
+    active_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+    if not active_key or not texts:
+        return None if not active_key else []
+    try:
+        import requests
+    except Exception:
+        return None
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {active_key}"}
+    safe = [t if (t and t.strip()) else " " for t in texts]
+    vectors: List[List[float]] = []
+    for start in range(0, len(safe), _OPENAI_EMBED_BATCH):
+        batch = safe[start:start + _OPENAI_EMBED_BATCH]
+        try:
+            resp = requests.post(_OPENAI_EMBED_URL, headers=headers,
+                                 json={"model": model, "input": batch}, timeout=timeout)
+        except Exception:
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            data = sorted(resp.json()["data"], key=lambda d: d.get("index", 0))
+            vectors.extend([d["embedding"] for d in data])
+        except Exception:
+            return None
+    return vectors
+
+
+def _cosine_py(a: List[float], b: List[float]) -> float:
+    """순수 파이썬 코사인 유사도(-1~1). sklearn 불필요."""
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return sum(x * y for x, y in zip(a, b)) / (na * nb)
+
+
+def _dense_threshold_note(engine: Optional[str], cutoff: float) -> str:
+    """Dense 엔진별 cutoff 해석 안내. UI가 출처/임계값을 정직하게 표시할 때 사용한다."""
+    if not engine:
+        return "Dense 비활성: Sparse-only 결과입니다."
+    if engine == "ko-sroberta":
+        return f"ko-sroberta Dense cutoff={cutoff:.2f}. 로컬 sentence-transformers 의미공간 기준입니다."
+    return (
+        f"Dense-OpenAI({engine}) cutoff={cutoff:.2f}. "
+        "OpenAI 임베딩은 ko-sroberta와 cosine 분포가 다르므로 이 값은 임시 기준이며 "
+        "tools/calibrate_min_dense_score.py로 실측 보정하는 것을 권장합니다."
+    )
+
 
 try:
     import transformers
@@ -146,11 +212,17 @@ def search_relevant_rules(
     top_k: int = 8,
     dense_model: Optional[Any] = None,
     rule_embeddings: Optional[Any] = None,
+    openai_api_key: str = "",
+    openai_rule_embeddings: Optional[List[List[float]]] = None,
+    openai_embed_model: str = DEFAULT_OPENAI_EMBED_MODEL,
+    min_dense_score: Optional[float] = None,
 ) -> str:
     """기사 텍스트와 룰 간의 연관성을 계산하여 top_k개를 선택해 반환한다.
 
-    dense_model과 rule_embeddings가 주어지면 Sentence-Transformers 기반의
-    Dense(의미적) 검색을 수행하고, 없으면 기존의 Jaccard(어절 겹침) 검색을 수행한다.
+    Dense 우선순위:
+      1) dense_model+rule_embeddings(ko-sroberta) → 기존 의미 검색 (불변)
+      2) 없고 openai_api_key 있음 → OpenAI 임베딩 Dense (클라우드; ko-sroberta와 다른 의미공간)
+      3) 둘 다 없음 → Jaccard(어절 겹침) Sparse 검색 (불변)
     """
     # 기사 텍스트 합성
     article_text = " ".join(
@@ -166,22 +238,41 @@ def search_relevant_rules(
         # fallback: 기사가 없으면 기존 방식으로 상위 k개 반환
         return _format_rules(rules_data.get("rules", [])[:top_k])
 
+    rules_list = rules_data.get("rules", [])
+    scored: List[Tuple[float, Dict[str, Any]]] = []
+    dense_path_used = False
+
     if dense_model is not None and rule_embeddings is not None:
+        # ── 1) ko-sroberta Dense (기존, 불변) ──
         try:
             from sklearn.metrics.pairwise import cosine_similarity
             query_emb = dense_model.encode([article_text])
             sims = cosine_similarity(query_emb, rule_embeddings)[0]
-            scored = [(sim, r) for sim, r in zip(sims, rules_data.get("rules", []))]
+            scored = [(sim, r) for sim, r in zip(sims, rules_list)]
+            dense_path_used = True
         except Exception:
-            # Fallback if scikit-learn is missing
             scored = []
+            dense_path_used = False
+    elif openai_api_key:
+        # ── 2) OpenAI Dense (신규, 클라우드) ──
+        try:
+            q = openai_embed_texts([article_text], api_key=openai_api_key, model=openai_embed_model)
+            if q:
+                rv = openai_rule_embeddings or openai_embed_texts(
+                    [_rule_text(r) for r in rules_list], api_key=openai_api_key, model=openai_embed_model
+                )
+                if rv:
+                    scored = [(_cosine_py(q[0], vec), r) for vec, r in zip(rv, rules_list)]
+                    dense_path_used = True
+        except Exception:
+            scored = []
+            dense_path_used = False
     else:
+        # ── 3) Sparse (Jaccard, 기존 불변) ──
         query_tokens = _tokenize_ko(article_text)
         if not query_tokens:
-            return _format_rules(rules_data.get("rules", [])[:top_k])
-
-        scored = []
-        for r in rules_data.get("rules", []):
+            return _format_rules(rules_list[:top_k])
+        for r in rules_list:
             rule_tokens = _tokenize_ko(_rule_text(r))
             if not rule_tokens:
                 continue
@@ -191,9 +282,20 @@ def search_relevant_rules(
             scored.append((jaccard, r))
 
     if not scored:
-        return _format_rules(rules_data.get("rules", [])[:top_k])
+        return _format_rules(rules_list[:top_k])
 
     scored.sort(key=lambda x: x[0], reverse=True)
+
+    # LLM 프롬프트 주입용 RAG는 항상 top_k 후보를 확보하는 것이 우선이다.
+    # Evidence Panel(compare_rag_results)은 cutoff를 엄격히 적용해 화면 표시용 필터링을 수행하지만,
+    # 여기서는 cutoff가 너무 높아 후보가 0~소수로 줄어 LLM이 룰 맥락 없이 feature를 추출하는 일을 막는다.
+    # 따라서 Dense 경로에서 cutoff 통과 후보가 top_k개 이상일 때만 필터 결과를 쓰고,
+    # 부족하면 unfiltered top_k로 폴백한다. Sparse 점수에는 Dense cutoff를 적용하지 않는다.
+    if min_dense_score is not None and dense_path_used:
+        filtered_scored = [(float(s), r) for s, r in scored if float(s) >= float(min_dense_score)]
+        if len(filtered_scored) >= min(top_k, len(scored)):
+            scored = filtered_scored
+
     top_rules = [r for _, r in scored[:top_k]]
     return _format_rules(top_rules)
 
@@ -217,10 +319,17 @@ def compare_rag_results(
     rule_embeddings: Optional[Any] = None,
     min_sparse_score: float = 0.001,
     min_dense_score: float = 0.15,
+    openai_api_key: str = "",
+    openai_rule_embeddings: Optional[List[List[float]]] = None,
+    openai_embed_model: str = DEFAULT_OPENAI_EMBED_MODEL,
 ) -> Dict[str, Any]:
-    """같은 기사에 대해 Sparse(Jaccard 키워드 매칭)와 Dense(ko-sroberta 의미 임베딩)를 동시에 실행해 비교한다.
+    """같은 기사에 Sparse(Jaccard)와 Dense(ko-sroberta 또는 OpenAI)를 동시에 실행해 비교한다.
 
-    scikit-learn이 설치되지 않은 환경(예: Streamlit Cloud)에서는 Dense RAG를 안전하게 비활성화한다.
+    Dense 엔진 우선순위:
+      1) ko-sroberta(dense_model+rule_embeddings) → dense_engine="ko-sroberta"
+      2) 없고 openai_api_key → OpenAI 임베딩 → dense_engine=<openai 모델명>
+      3) 둘 다 없음 → Dense 비활성(Sparse-only)
+    두 엔진은 의미공간이 달라 cosine 분포·임계값(min_dense_score)이 서로 다르다. 특히 OpenAI Dense에서 0.15는 확정 기준이 아니라 실측 보정 전 임시 cutoff다.
     """
     # 1. Sparse RAG (Jaccard Similarity)
     article_text = " ".join(
@@ -248,8 +357,10 @@ def compare_rag_results(
     dense_available = False
     dense_top = []
     dense_filtered_count = 0
+    dense_engine = None
     
     if dense_model is not None and rule_embeddings is not None:
+        # ── 1) ko-sroberta Dense (기존, 불변) ──
         try:
             from sklearn.metrics.pairwise import cosine_similarity
             query_emb = dense_model.encode([article_text])
@@ -264,6 +375,30 @@ def compare_rag_results(
             dense_top = dense_scores[:top_k]
             dense_filtered_count = len(dense_scores)
             dense_available = True
+            dense_engine = "ko-sroberta"
+        except Exception:
+            dense_available = False
+            dense_top = []
+            dense_filtered_count = 0
+    elif openai_api_key:
+        # ── 2) OpenAI Dense (신규, 클라우드) ──
+        try:
+            q = openai_embed_texts([article_text], api_key=openai_api_key, model=openai_embed_model)
+            if q:
+                rv = openai_rule_embeddings or openai_embed_texts(
+                    [_rule_text(r) for r in rules], api_key=openai_api_key, model=openai_embed_model
+                )
+                if rv:
+                    dense_scores = []
+                    for vec, r in zip(rv, rules):
+                        sim_val = _cosine_py(q[0], vec)
+                        if sim_val >= min_dense_score:
+                            dense_scores.append((sim_val, r))
+                    dense_scores.sort(key=lambda x: x[0], reverse=True)
+                    dense_top = dense_scores[:top_k]
+                    dense_filtered_count = len(dense_scores)
+                    dense_available = True
+                    dense_engine = openai_embed_model
         except Exception:
             dense_available = False
             dense_top = []
@@ -280,6 +415,8 @@ def compare_rag_results(
     return {
         "sparse_available": bool(sparse_top),
         "dense_available": dense_available,
+        "dense_engine": dense_engine,
+        "dense_threshold_note": _dense_threshold_note(dense_engine, min_dense_score),
         "sparse_top": sparse_top,
         "dense_top": dense_top,
         "common_ids": common_ids,
@@ -301,13 +438,16 @@ def extract_features_with_sllm(
     dense_model: Optional[Any] = None,
     rule_embeddings: Optional[Any] = None,
     api_key: Optional[str] = None,
+    min_dense_score: Optional[float] = None,
 ) -> Tuple[Dict[str, float], Dict[str, Any]]:
     """Run extraction using OpenAI GPT or a local Hugging Face model.
 
     If OpenAI GPT model is specified, it runs API call without needing transformers/torch.
     """
     rag_selected_rules = search_relevant_rules(
-        articles, rules_data, dense_model=dense_model, rule_embeddings=rule_embeddings
+        articles, rules_data, dense_model=dense_model, rule_embeddings=rule_embeddings,
+        openai_api_key=(api_key or os.environ.get("OPENAI_API_KEY", "")),
+        min_dense_score=min_dense_score,
     )
     prompt = build_prompt(articles, rag_selected_rules)
 
@@ -411,6 +551,10 @@ def extract_features_with_sllm(
         "reason": parsed.get("reason", ""),
         "prompt_preview": prompt[:1600],
         "rag_selected_rules": rag_selected_rules,
-        "rag_mode": "dense" if (dense_model is not None and rule_embeddings is not None) else "sparse_jaccard",
+        "rag_mode": (
+            "dense_ko_sroberta" if (dense_model is not None and rule_embeddings is not None)
+            else ("dense_openai" if (api_key or os.environ.get("OPENAI_API_KEY", "")) else "sparse_jaccard")
+        ),
+        "rag_min_dense_score": min_dense_score,
     }
     return features, meta

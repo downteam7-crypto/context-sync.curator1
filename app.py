@@ -55,8 +55,9 @@ except Exception as _sllm_import_error:  # pragma: no cover - deployment guard
             "로컬에서 LLM/sLLM 모드를 쓰려면 requirements-sllm.txt를 설치하세요."
         )
 
-    def compare_rag_results(articles, rules_data, top_k=8, dense_model=None, rule_embeddings=None, min_sparse_score=0.001, min_dense_score=0.15):
-        # Minimal Sparse-only fallback for cloud deployments.
+    def compare_rag_results(articles, rules_data, top_k=8, dense_model=None, rule_embeddings=None, min_sparse_score=0.001, min_dense_score=0.15, openai_api_key="", openai_rule_embeddings=None, openai_embed_model="text-embedding-3-small"):
+        # Sparse-only fallback. 이 분기는 sllm_extractor import 자체가 실패한 극단 케이스에만 쓰인다
+        # (OpenAI Dense 로직도 sllm_extractor에 있으므로 여기선 사용 불가). 정상 배포에선 진짜 함수가 OpenAI Dense를 처리한다.
         article_text = " ".join(
             " ".join(str(a.get(k, "")) for k in ["title", "subtitle", "summary", "body", "text", "content"] if a.get(k))
             for a in articles
@@ -77,6 +78,7 @@ except Exception as _sllm_import_error:  # pragma: no cover - deployment guard
         return {
             "sparse_available": bool(sparse_top),
             "dense_available": False,
+            "dense_engine": None,
             "sparse_top": sparse_top,
             "dense_top": [],
             "common_ids": [],
@@ -115,6 +117,20 @@ def load_dense_model():
 @st.cache_resource(show_spinner="규칙 벡터화 중입니다...")
 def compute_rule_embeddings(_model, rules_list):
     return _model.encode([_rule_text(r) for r in rules_list])
+
+@st.cache_resource(show_spinner="규칙을 OpenAI 임베딩으로 벡터화 중입니다 (최초 1회)...")
+def compute_openai_rule_embeddings(rules_list, api_key: str, embed_model: str = "text-embedding-3-small"):
+    """클라우드 Dense RAG용 OpenAI 룰 임베딩 캐시.
+
+    동일 rules_list/키/모델이면 캐시 재사용(1024개 룰 재임베딩 비용·지연 방지).
+    헬퍼는 sllm_extractor.openai_embed_texts를 사용하므로 별도 의존성 없음.
+    실패 시 None → compare_rag_results가 즉석 계산 또는 Sparse-only로 fallback.
+    """
+    try:
+        from sllm_extractor import openai_embed_texts
+        return openai_embed_texts([_rule_text(r) for r in rules_list], api_key=api_key, model=embed_model)
+    except Exception:
+        return None
 
 rules_data = cached_rules(str(RULES_PATH))
 ontology = cached_ontology(str(ONTOLOGY_PATH))
@@ -186,7 +202,6 @@ with st.sidebar:
         value=default_key,
         help="GPT 모델 이용 시 필요합니다. Streamlit Cloud Secrets 또는 사이드바 입력을 사용할 수 있습니다.",
     )
-    sllm_max_tokens = st.slider("LLM max_new_tokens", 80, 500, 220)
     use_owl_audit_llm_summary = st.toggle(
         "OWL graph audit LLM 요약 생성",
         value=False,
@@ -196,18 +211,56 @@ with st.sidebar:
             "기사 본문은 다시 보내지 않고 OWL reasoning trace / audit reasons / fired_rules 요약만 사용해 비용을 제한합니다."
         ),
     )
-    if not use_sllm:
+    if use_sllm:
+        st.caption(
+            "이 옵션은 최종 axiom_distortion의 직접 근거인 3.5 OWL graph audit을 사람이 읽기 쉽게 풀어쓰는 보조 설명입니다. "
+            "Feature/RAG LLM 추출 근거와는 별도이며, 점수 계산에는 관여하지 않습니다."
+        )
+    else:
         st.caption("OWL graph audit LLM 요약은 LLM 추출기를 켰을 때만 선택할 수 있습니다.")
-    st.caption("2차 배포 기준: Cloud에서는 OpenAI API 기반 추출까지만 권장합니다. Dense RAG/sentence-transformers/로컬 sLLM은 로컬 실행 옵션입니다.")
+    sllm_max_tokens = st.slider("LLM max_new_tokens", 80, 500, 220)
 
     st.divider()
+    st.subheader("RAG / Cloud 배포 모드")
+    st.caption(
+        "2차 배포 기준: Cloud에서는 OpenAI API 기반 추출과 Dense-OpenAI 비교를 지원합니다. "
+        "로컬 ko-sroberta Dense/sentence-transformers 시각화/로컬 sLLM은 requirements-sllm.txt 설치 후 로컬 실행 옵션입니다."
+    )
     if cloud_mode:
         use_dense_rag = False
-        st.info("Dense RAG / sentence-transformers 시각화는 Cloud 배포판에서 비활성화했습니다. GitHub 저장소를 내려받아 로컬에서 requirements-sllm.txt를 설치하면 사용할 수 있습니다.")
+        st.info(
+            "Cloud 배포판에서는 로컬 sentence-transformers / ko-sroberta Dense와 2D 시각화는 비활성화합니다. "
+            "다만 OpenAI API Key가 있으면 RAG Evidence Panel에서 Dense-OpenAI(text-embedding-3-small) 비교를 사용할 수 있습니다. "
+            "로컬에서 ko-sroberta Dense와 시각화를 쓰려면 requirements-sllm.txt를 설치하고 STREAMLIT_CLOUD=0으로 실행하세요."
+        )
     else:
         use_dense_rag = st.toggle("🚀 [Local Beta] 밀집 벡터(Dense) RAG 및 시각화", value=False)
         if use_dense_rag:
             st.caption("`jhgan/ko-sroberta-multitask` 모델을 사용하여 RAG 및 2D 시각화를 수행합니다.")
+
+    dense_min_score = st.slider(
+        "Dense RAG min similarity cutoff",
+        min_value=0.00,
+        max_value=0.90,
+        value=0.15,
+        step=0.01,
+        help=(
+            "RAG Evidence Panel에서 Dense 후보 규칙을 통과시킬 최소 cosine similarity입니다. "
+            "LLM feature 추출용 RAG는 후보가 너무 적어지는 것을 막기 위해 top_k 보장 폴백을 적용합니다. "
+            "Cloud의 Dense-OpenAI와 Local의 ko-sroberta는 의미공간이 달라 같은 값으로 해석하면 안 됩니다."
+        ),
+    )
+    if cloud_mode:
+        st.caption(
+            f"현재 Dense-OpenAI cutoff: `{dense_min_score:.2f}`. "
+            "0.15는 임시 기본값이며, 실제 기사/룰셋 분포에 맞게 `tools/calibrate_min_dense_score.py`로 보정하거나 "
+            "이 슬라이더로 시연 중 직접 조정할 수 있습니다. 단, LLM feature 추출용 RAG는 cutoff가 너무 엄격해도 최소 top_k 후보를 보장하도록 폴백합니다."
+        )
+    else:
+        st.caption(
+            f"현재 Dense cutoff: `{dense_min_score:.2f}`. "
+            "로컬 ko-sroberta와 Cloud Dense-OpenAI는 cosine 분포가 다르므로 같은 cutoff라도 의미가 달라질 수 있습니다."
+        )
 
     st.divider()
     top_n = st.slider("표시할 트리거 규칙 수", 3, 30, 12)
@@ -571,8 +624,10 @@ def _llm_mode_label(model_name: str, cloud_mode: bool) -> str:
 
 
 def _rag_mode_label(rag_mode: str) -> str:
-    if rag_mode == "dense":
-        return "Dense RAG (sentence-transformers 의미 임베딩)"
+    if rag_mode in {"dense", "dense_ko_sroberta"}:
+        return "Dense RAG (ko-sroberta / sentence-transformers 의미 임베딩)"
+    if rag_mode == "dense_openai":
+        return "Dense-OpenAI RAG (text-embedding-3-small cosine similarity)"
     return "Sparse RAG (Jaccard 어절/키워드 매칭)"
 
 
@@ -1142,6 +1197,7 @@ with tab1:
                         dense_model=dense_model,
                         rule_embeddings=rule_embeddings,
                         api_key=openai_api_key,
+                        min_dense_score=dense_min_score,
                     )
                 except Exception as e:
                     st.error(f"LLM 추출 실패: {e}")
@@ -1152,16 +1208,28 @@ with tab1:
         if articles:
             with st.expander("🔍 RAG Evidence Panel — Sparse vs Dense 병렬 비교", expanded=False):
                 st.caption(
-                    "**이중 RAG**: 같은 기사에 대해 Sparse(Jaccard 키워드 매칭)와 Dense(ko-sroberta 의미 임베딩)를 *동시에* 실행해 "
-                    "어떤 룰을 가져오는지 *나란히* 비교합니다. 두 검색의 차이가 *그 자체로 정보*입니다."
+                    "**이중 RAG**: 같은 기사에 Sparse(Jaccard 키워드)와 Dense(의미 임베딩)를 *동시에* 실행해 "
+                    "어떤 룰을 가져오는지 *나란히* 비교합니다. 두 검색의 차이가 *그 자체로 정보*입니다.  \n"
+                    "Dense 엔진 — 로컬: ko-sroberta · 클라우드: Dense-OpenAI(text-embedding-3-small, 키 입력 시). "
+                    "두 엔진은 의미공간이 달라 cosine 분포와 `min_dense_score`를 같은 의미로 해석하면 안 됩니다. "
+                    f"현재 cutoff는 `{dense_min_score:.2f}`이며, 사이드바 슬라이더로 직접 조정할 수 있습니다. "
+                    "이 cutoff는 Evidence Panel의 Dense 표시 필터에 엄격히 적용됩니다. "
+                    "LLM feature 추출 프롬프트는 cutoff 통과 후보가 부족하면 unfiltered top_k로 폴백해 룰 맥락을 보존합니다. "
+                    "Dense-OpenAI 기준값은 `tools/calibrate_min_dense_score.py`로 실측 보정하는 것을 권장합니다."
                 )
+                # 클라우드 Dense-OpenAI용 룰 임베딩 캐시 (로컬 dense_model이 없고 키가 있을 때만)
+                _openai_rule_embs = None
+                if dense_model is None and openai_api_key:
+                    _openai_rule_embs = compute_openai_rule_embeddings(rules, openai_api_key)
                 rag_cmp = compare_rag_results(
                     articles, rules_data,
                     top_k=8,
                     dense_model=dense_model,
                     rule_embeddings=rule_embeddings,
                     min_sparse_score=0.001,
-                    min_dense_score=0.15,
+                    min_dense_score=dense_min_score,
+                    openai_api_key=openai_api_key,
+                    openai_rule_embeddings=_openai_rule_embs,
                 )
                 st.caption(
                     f"낮은 관련도 후보는 필터링합니다: "
@@ -1170,6 +1238,13 @@ with tab1:
                     f"필터링 수: Sparse {rag_cmp.get('sparse_filtered_count', 0)}개, "
                     f"Dense {rag_cmp.get('dense_filtered_count', 0)}개."
                 )
+                _dense_engine_for_note = rag_cmp.get("dense_engine")
+                if _dense_engine_for_note and _dense_engine_for_note != "ko-sroberta":
+                    st.caption(
+                        f"Dense-OpenAI의 현재 cutoff는 `{dense_min_score:.2f}`입니다. "
+                        "이 값은 ko-sroberta 기준값과 같은 의미가 아니며, 사이드바 슬라이더로 조정하거나 "
+                        "실제 기사/룰셋 분포에 맞게 `tools/calibrate_min_dense_score.py`로 보정하세요."
+                    )
                 if not rag_cmp["sparse_available"]:
                     st.info("Sparse 검색 결과가 없거나 최소 관련도 기준을 통과한 룰이 없습니다.")
                 else:
@@ -1189,7 +1264,14 @@ with tab1:
                         ])
                         st.dataframe(sp_df, width="stretch", hide_index=True)
                     with rcol2:
-                        st.markdown("##### 🧠 Dense (ko-sroberta 의미 임베딩)")
+                        _engine = rag_cmp.get("dense_engine")
+                        if _engine and _engine != "ko-sroberta":
+                            _dense_label = f"🧠 Dense (OpenAI · `{_engine}`)"
+                        elif _engine == "ko-sroberta":
+                            _dense_label = "🧠 Dense (ko-sroberta 의미 임베딩)"
+                        else:
+                            _dense_label = "🧠 Dense (의미 임베딩)"
+                        st.markdown(f"##### {_dense_label}")
                         st.caption("의미적 유사성·구조적 패턴 매칭에 강함")
                         if rag_cmp["dense_available"]:
                             de_df = pd.DataFrame([
@@ -1205,8 +1287,9 @@ with tab1:
                             st.dataframe(de_df, width="stretch", hide_index=True)
                         else:
                             st.warning(
-                                "Dense RAG가 비활성화되어 있거나, 최소 similarity 기준을 통과한 룰이 없습니다. "
-                                "사이드바에서 `[Beta] 밀집 벡터(Dense) RAG`를 활성화하거나 입력 기사/룰셋의 관련도를 확인하세요."
+                                "Dense RAG가 비활성화되어 있거나, 최소 similarity 기준을 통과한 룰이 없습니다.  \n"
+                                "• 로컬: 사이드바에서 `[Beta] 밀집 벡터(Dense) RAG`를 활성화하세요.  \n"
+                                "• 클라우드: 사이드바에 OpenAI API 키를 입력하면 OpenAI 임베딩으로 Dense가 활성화됩니다."
                             )
 
                     # 교집합 / 차집합 분석
@@ -1353,8 +1436,11 @@ with tab1:
                 st.write("**모델**", sllm_meta.get("model"))
                 st.write(
                     "**RAG 모드**",
-                    "Dense (의미 임베딩)" if sllm_meta.get("rag_mode") == "dense" else "Sparse (Jaccard 어절 겹침)",
+                    _rag_mode_label(str(sllm_meta.get("rag_mode", "") or "")),
                 )
+                if sllm_meta.get("rag_min_dense_score") is not None:
+                    st.write("**Dense cutoff**", f"{float(sllm_meta.get('rag_min_dense_score')):.2f}")
+                    st.caption("LLM feature 추출용 RAG는 이 cutoff를 참고하되, 통과 후보가 부족하면 최소 top_k 후보를 보장하도록 폴백합니다.")
                 st.write("**Feature/RAG 추출 근거**", sllm_meta.get("reason", ""))
                 rag_rules = sllm_meta.get("rag_selected_rules", "")
                 if rag_rules:
@@ -1983,6 +2069,8 @@ with tab5:
 ├─ sllm_extractor.py              # OpenAI GPT 추출기 + 로컬 sLLM/Dense RAG 옵션
 ├─ requirements.txt               # Streamlit Cloud 경량 의존성
 ├─ requirements-sllm.txt          # 로컬 sLLM / Dense RAG 고급 의존성
+├─ tools/
+│  └─ calibrate_min_dense_score.py # OpenAI Dense cutoff 진단·보정 도구(측정용)
 ├─ README.md
 ├─ LICENSE
 ├─ .env.example
@@ -2013,8 +2101,13 @@ with tab5:
     st.markdown("#### Cloud 배포 범위")
     st.write(
         "Streamlit Cloud에서는 `requirements.txt`만 설치해 앱을 가볍게 실행합니다. "
-        "`torch`, `transformers`, `sentence-transformers`, `scikit-learn` 기반의 Dense RAG/로컬 sLLM 기능은 "
-        "`requirements-sllm.txt`로 분리해 로컬 실행 옵션으로 둡니다."
+        "로컬 `torch`, `transformers`, `sentence-transformers`, `scikit-learn` 기반 ko-sroberta Dense/2D 시각화/로컬 sLLM 기능은 "
+        "`requirements-sllm.txt`로 분리해 로컬 실행 옵션으로 둡니다. "
+        "다만 OpenAI API Key가 있으면 Cloud에서도 `text-embedding-3-small` 기반 Dense-OpenAI RAG 비교를 사용할 수 있습니다."
+    )
+    st.caption(
+        "`tools/calibrate_min_dense_score.py`는 앱 값을 자동 변경하지 않는 측정용 보정 도구입니다. "
+        "OpenAI Dense의 cosine cutoff 분포를 진단한 뒤, 필요한 경우 사이드바의 Dense RAG cutoff 슬라이더나 코드 기본값에 수동 반영합니다."
     )
     st.code(
         """# Cloud
@@ -2034,6 +2127,7 @@ STREAMLIT_CLOUD=0 streamlit run app.py
         "대용량 기사 원문, 임베딩 DB, 캐시, 가상환경, `__pycache__`/`.pyc` 파일은 저장소에서 제외합니다."
     )
     st.info(
-        "Cloud 데모는 경량 배포판입니다. Dense RAG, sentence-transformers 시각화, 로컬 Hugging Face sLLM은 "
-        "GitHub 저장소를 내려받아 로컬에서 실행할 때 사용하는 고급 옵션입니다."
+        "Cloud 데모는 경량 배포판입니다. 로컬 ko-sroberta Dense, sentence-transformers 시각화, 로컬 Hugging Face sLLM은 "
+        "GitHub 저장소를 내려받아 로컬에서 실행할 때 사용하는 고급 옵션입니다. "
+        "Cloud의 Dense RAG는 OpenAI 임베딩 기반 Dense-OpenAI로 대체 제공되며, cutoff 보정 도구는 `tools/`에 별도 보관합니다."
     )

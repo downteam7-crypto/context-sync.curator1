@@ -5,7 +5,7 @@
 **Live Demo**: <https://context-sync-curator1.streamlit.app/>  
 **GitHub Repository**: <https://github.com/downteam7-crypto/context-sync.curator1>
 
-**현재 버전: v2.1** (4단계 — 기사 묶음 일괄 분석, Streamlit) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/로드맵_3단계`](./legacy/로드맵_3단계/)에 보존
+**현재 버전: v2.2** (4단계 Streamlit — 기사 묶음 일괄 분석 + Cloud Dense-OpenAI RAG) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/로드맵_3단계`](./legacy/로드맵_3단계/)에 보존
 
 뉴스 기사 묶음의 시계열 논조 변화가 *맥락 정합성* 안에서 일관되는지, 아니면 *기준 이탈*인지를 다층적으로 평가하는 프로토타입.
 
@@ -195,12 +195,16 @@ OWL은 *어휘로 풍부*(20개 Frame)하지만, JSON 룰셋은 그 *부분집�
 - 5차원 dimension_breakdown 분해 표 + 막대그래프
 - 같은 (outlet, topic) 그룹 인지 — *교차 매체 섞임 없음*
 
-#### ② RAG Evidence Panel — Cloud 경량 / Local 확장 분리
+#### ② RAG Evidence Panel — Dense 엔진 이원화 (Cloud: OpenAI / Local: ko-sroberta)
 
-- **Streamlit Community Cloud 배포판**에서는 설치 부담을 줄이기 위해 기본적으로 *Sparse(Jaccard 키워드) 기반 Evidence Panel*을 사용한다.
-- **Dense RAG(ko-sroberta 의미 임베딩)와 sentence-transformers 기반 비교 기능**은 Cloud 기본 배포에서 제외한다.
-- Dense RAG가 궁금한 사용자는 GitHub 저장소를 직접 내려받아 `requirements-sllm.txt`를 설치한 뒤 로컬에서 실행할 수 있다.
-- 이유: `sentence-transformers`, `torch`, 한국어 임베딩 모델 다운로드는 Cloud 초기 배포를 무겁게 만들 수 있으므로, 웹 공개판은 룰 엔진·OWL·JSON·OpenAI 선택 추출기 중심의 경량 데모로 유지한다.
+같은 기사에 **Sparse(Jaccard 키워드)**와 **Dense(의미 임베딩)**를 동시에 실행해 어떤 룰을 가져오는지 *나란히* 비교한다. 두 검색의 교집합/차집합 차이 *자체가 정보*다.
+
+Dense 엔진은 실행 환경에 따라 둘로 나뉜다.
+
+- **Local — ko-sroberta**: `requirements-sllm.txt` + `STREAMLIT_CLOUD=0`으로 실행하면 `sentence-transformers` 기반 한국어 임베딩(`jhgan/ko-sroberta-multitask`)으로 Dense RAG를 수행한다.
+- **Cloud — Dense-OpenAI**: Streamlit Community Cloud 배포판에서는 `sentence-transformers`/`torch`를 포함하지 않지만, **OpenAI API Key가 있으면 `text-embedding-3-small` 기반 Dense-OpenAI 비교가 가능하다.** 키가 없으면 자동으로 *Sparse(Jaccard) 단독*으로 폴백한다.
+- **출처 표시**: 반환값 `dense_engine`(`ko-sroberta` / `text-embedding-3-small`)과 `rag_mode`(`dense_ko_sroberta` / `dense_openai` / `sparse_jaccard`)로 *어느 엔진이 쓰였는지* UI에 명시한다. 두 엔진은 *의미 공간이 다르므로* cosine 분포·임계값을 같은 의미로 해석하지 않는다.
+- **cutoff 슬라이더**: 사이드바의 *Dense RAG min similarity cutoff* 슬라이더로 `min_dense_score`를 직접 조작한다. 기본값 0.15는 ko-sroberta 기준 잠정값이며, OpenAI 임베딩에서는 *실측 보정 대상*이다 (→ `tools/calibrate_min_dense_score.py`).
 
 #### ③ 수동 시뮬레이터 (의미값 파라미터 직접 조작)
 
@@ -208,6 +212,7 @@ OWL은 *어휘로 풍부*(20개 Frame)하지만, JSON 룰셋은 그 *부분집�
 - *5개 가중치 슬라이더 + 합 검증* (weights 조작 모드)
 - 5개 프리셋: **v2.0 baseline (OWL 기본값)**, **시계열 엄격 (legacy 3.5단계 모드)**, 사실 우선, 프레임 우선, 다원 이성
 - 차원별 기여도 분해 표시
+- **Dense RAG cutoff 슬라이더** (사이드바 전역 설정): `min_dense_score`를 0.00~0.90 범위에서 직접 조작. cutoff를 올리면 Evidence Panel의 Dense 후보가 줄어드는 것을 *실시간으로* 확인할 수 있다. (단 LLM 추출용 RAG는 후보 부족 시 top_k로 폴백 — 아래 처리 단계 참조)
 
 *"기준층은 절대 진실이 아니라 합의의 표상이다"*가 *손에 잡히는 슬라이더*로 시연된다.
 
@@ -227,6 +232,9 @@ group by (outlet, topic) → 같은 매체-같은 사안 그룹화
 첫 기사 ↔ 마지막 기사 audit_temporal_pair
    ↓
 Stage 1: 휴리스틱 또는 LLM ExtractedSymbol (ValueAnchor + Frame + stance_polarity)
+  · LLM 추출 시 RAG로 관련 룰을 프롬프트에 주입. Dense cutoff가 높아 통과 후보가
+    top_k 미만이면 unfiltered top_k로 폴백 → LLM이 룰 맥락 없이 추출하는 일을 방지
+    (Evidence Panel 표시용 Dense는 cutoff를 엄격 적용 / LLM 입력용은 맥락 보존, 두 경로 분리)
 Stage 2: polarity_shift 연속 감점 (compute_temporal_shift_penalty)
 Stage 3: OWL 그래프 추론
   3a. 과거 Value ↔ 현재 Frame conflictsWith (cross-temporal, explanation_factor 적용)
@@ -255,7 +263,7 @@ final_distortion + verdict + reasoning_trace
 - 기본 의존성: `requirements.txt`
 - 테마/업로드 설정: `.streamlit/config.toml`
 - OpenAI API Key: GitHub에 올리지 않고 Streamlit Cloud의 **Secrets**에 등록
-- Dense RAG / sentence-transformers / 로컬 sLLM: Cloud 기본 배포에서 제외, 로컬 확장 옵션으로 분리
+- Dense RAG: Cloud에서는 **OpenAI 임베딩(`text-embedding-3-small`) 기반 Dense-OpenAI**를 API Key가 있을 때 제공. `sentence-transformers`/`torch`/로컬 ko-sroberta Dense·2D 시각화·로컬 sLLM은 Cloud 기본 배포에서 제외하고 로컬 확장 옵션으로 분리
 
 ### Cloud 배포 범위
 
@@ -269,16 +277,18 @@ Cloud 배포판은 다음 기능을 우선 제공한다.
 - URL/JSON/직접 입력 기반 기사 분석
 - OpenAI API Key 입력 또는 Secrets 기반 LLM 추출기
 - Sparse/Jaccard 기반 룰 근거 탐색
+- **Dense-OpenAI RAG** (`text-embedding-3-small`) — OpenAI API Key가 있을 때 활성화. Sparse vs Dense-OpenAI 병렬 비교 + cutoff 슬라이더 제공
 
-Cloud 배포판에서 의도적으로 제외하는 기능:
+Cloud 배포판에서 의도적으로 제외하는 기능 (로컬 확장 옵션):
 
-- Dense RAG
-- `sentence-transformers`
-- `torch`
+- 로컬 ko-sroberta Dense (`sentence-transformers` / `torch`)
+- 의미 공간(Embedding Space) 2D 시각화
 - 로컬 sLLM inference
 - 한국어 임베딩 모델 자동 다운로드
 
-이 기능들은 앱의 핵심 계산 구조가 아니라 **고급 근거 검색·로컬 실험 옵션**이다. 웹 배포판에서는 설치 안정성과 실행 속도를 우선하여 제외한다.
+이 기능들은 `sentence-transformers`·`torch`·임베딩 모델 다운로드를 요구해 Cloud 초기 배포를 무겁게 만들므로 제외한다. **단 Dense RAG 자체는 Cloud에서 사라진 것이 아니라, ko-sroberta(로컬) 대신 OpenAI 임베딩(Cloud)으로 엔진이 바뀌는 것이다.** 두 엔진은 의미 공간이 다르므로 `min_dense_score`를 동일하게 해석하지 않으며, OpenAI Dense의 cutoff는 `tools/calibrate_min_dense_score.py`로 실측 보정하는 것을 권장한다.
+
+> **재현성 주의**: LLM 추출기 ON + Cloud + OpenAI Key 조합에서는, RAG 후보 룰 선택에 Dense-OpenAI가 우선 사용될 수 있다. 단, 키가 없거나 Dense 후보가 충분하지 않으면 Sparse 또는 unfiltered `top_k` 폴백이 작동한다. 따라서 동일 기사라도 환경(로컬 ko-sroberta / Cloud OpenAI / Sparse)과 cutoff 설정에 따라 feature 추출 결과가 달라질 수 있다. 이는 의도된 개선이지만, 결과 비교 시 실행 환경을 함께 기록해야 한다.
 
 ### Streamlit Cloud Secrets 예시
 
@@ -343,7 +353,7 @@ cp .env.example .env
 # 편집기로 .env 열어서 OPENAI_API_KEY 입력
 ```
 
-또는 앱 사이드바에서 직접 입력 가능. LLM 없이도 *휴리스틱 추출기*로 모든 기능 작동.
+또는 앱 사이드바에서 직접 입력 가능. LLM 없이도 *휴리스틱 추출기*로 모든 기능 작동. 이 키는 LLM 추출뿐 아니라 **Cloud 환경의 Dense-OpenAI RAG**(`text-embedding-3-small`)에도 사용된다 — 키가 없으면 Dense는 Sparse로 자동 폴백.
 
 ### 4. Streamlit 앱 실행
 
@@ -353,9 +363,9 @@ streamlit run app.py
 
 브라우저에서 자동으로 열리거나 `http://localhost:8501` 접속.
 
-### 5. (선택) 로컬 고급 모드: Dense RAG / sLLM
+### 5. (선택) 로컬 고급 모드: ko-sroberta Dense RAG / sLLM / 2D 시각화
 
-Streamlit Community Cloud 배포판에는 Dense RAG와 sentence-transformers를 기본 포함하지 않는다. 로컬에서 고급 기능을 실험하려면 별도 의존성을 설치한다.
+Cloud 배포판에서는 Dense RAG가 OpenAI 임베딩으로 제공되지만(API Key 필요), **로컬 ko-sroberta Dense**와 의미 공간 2D 시각화·로컬 sLLM은 `sentence-transformers`/`torch`를 요구해 기본 포함하지 않는다. 이들을 로컬에서 실험하려면 별도 의존성을 설치한다.
 
 ```bash
 pip install -r requirements-sllm.txt
@@ -413,7 +423,7 @@ Dense RAG를 켜면 한국어 임베딩 모델이 자동 다운로드될 수 있
 - **차원별 페널티 분해**: 5차원 dimension_breakdown 표 + 막대그래프
 - **시계열 그래프**: sentiment + 변곡점 마커
 - **OWL Reasoning Trace**: 추론 논리 사슬 표
-- **RAG Evidence Panel**: Cloud에서는 Sparse 중심, 로컬 고급 모드에서는 Sparse/Dense 병렬 비교
+- **RAG Evidence Panel**: Sparse + Dense 병렬 비교. Dense 엔진은 Cloud=OpenAI(`text-embedding-3-small`, 키 필요) / 로컬 고급 모드=ko-sroberta. 키 없으면 Sparse 단독
 - **트리거된 규칙**: axiom fired_rules + 메타 7필드 (frame_definition, schema_description, expected_evidence, score_hint 등)
 - **OWL 계층 시각화**: Mermaid 다이어그램
 - **수동 시뮬레이터**: 차원/가중치 슬라이더
@@ -434,7 +444,9 @@ context-sync.curator1/
 ├── .env.example
 ├── app.py                                       ← Streamlit 메인 앱
 ├── rule_engine.py                               ← axiom audit 엔진 (3층 분리의 계산 층)
-├── sllm_extractor.py                            ← LLM/sLLM 추출기 + Dense/Sparse RAG
+├── sllm_extractor.py                            ← LLM/sLLM 추출기 + Dense(ko-sroberta/OpenAI)/Sparse RAG
+├── tools/
+│   └── calibrate_min_dense_score.py             ← OpenAI Dense cutoff 진단·보정 도구 (측정용, 앱 자동반영 없음)
 ├── ontology/
 │   ├── context_sync_app_centered_ontology_1024.owl
 │   └── news_rules_1024.json
@@ -460,7 +472,24 @@ context-sync.curator1/
 
 > **버전 체계 안내**: 4단계 Streamlit 분석 도구는 *3.5단계까지의 Gradio Hybrid(legacy v1.x)와 별개의 메이저 라인*으로, **v2.0부터 새로 시작**한다. 즉 *4단계 진입 = v2.0*. legacy의 v1.0~v1.2.2는 `legacy/로드맵_3단계/`에 보존된다. (룰셋/OWL 데이터셋 내부 버전인 `v2.1.6-...`은 *데이터셋 자체의 일련 번호*이며 앱 버전과 별개 네임스페이스다.)
 
-### v2.1 (현재) — 5단계 판정 농도 + 제목 가중치 + frame-level soft cap
+### v2.2 (현재) — Cloud Dense-OpenAI RAG + cutoff calibration
+
+v2.2는 v2.1의 판정 구조를 유지한 상태에서, **Cloud 배포 환경의 RAG 근거 탐색을 보강한 버전**이다. v2.1이 *점수·판정 구조 정교화*라면, v2.2는 *Cloud/Local Dense 엔진 분리와 OpenAI 임베딩 기반 RAG 확장*에 초점을 둔다.
+
+> **변경 범위 (3층 분리 관점)**: v2.2는 OWL 어휘·1024 룰셋·5차원 점수 계산식(OWL/JSON 점수층)을 *변경하지 않는다*. 변경은 RAG 근거 탐색과 Cloud 배포 인프라(앱/추출기 층, `app.py`·`sllm_extractor.py`)에 한정된다. 즉 *판정 사상은 불변, 근거 탐색 인프라만 보강*한 버전이다. 동일 입력의 5차원 점수·verdict는 RAG 엔진과 무관하게 유지되며, 다만 LLM 추출 ON 시 프롬프트에 주입되는 RAG 후보가 엔진(Sparse / ko-sroberta / OpenAI)에 따라 달라져 feature 추출 결과가 달라질 수 있다.
+
+- **Cloud Dense-OpenAI RAG 도입**: Cloud 배포판에서 OpenAI API Key가 있으면 `text-embedding-3-small` 임베딩으로 Dense RAG를 수행한다. 기존 Cloud의 Sparse-only 한계를 줄이고, Sparse + Dense-OpenAI 병렬 비교를 제공한다.
+- **`compare_rag_results`·`search_relevant_rules` 양쪽에 OpenAI Dense 경로 추가**: Evidence Panel의 Dense 비교뿐 아니라, LLM feature 추출 프롬프트에 주입되는 RAG 후보 규칙도 Cloud에서는 OpenAI Dense를 사용할 수 있다.
+- **Dense 엔진 출처 명시**: `dense_engine`(`ko-sroberta` / `text-embedding-3-small`)과 `rag_mode`(`dense_ko_sroberta` / `dense_openai` / `sparse_jaccard`)로 *어느 엔진이 쓰였는지* UI에 표시한다. ko-sroberta와 OpenAI 임베딩은 의미 공간이 다르므로 cosine 값을 같은 의미로 해석하지 않는다.
+- **Dense cutoff 슬라이더 추가**: 사이드바 전역 설정에서 `min_dense_score`를 0.00~0.90 범위로 직접 조작한다. 기본값 0.15는 ko-sroberta 기준 잠정값이며, OpenAI Dense에서는 실측 보정 대상이다.
+- **Evidence Panel 표시용 cutoff와 LLM 입력용 RAG 경로 분리**: Evidence Panel은 cutoff를 엄격 적용하지만, LLM feature 추출용 RAG는 cutoff 통과 후보가 `top_k` 미만이면 unfiltered `top_k`로 폴백한다. 이로써 슬라이더를 높였을 때 LLM이 룰 맥락 없이 추출하는 문제를 막는다.
+- **`dense_path_used` 플래그로 cutoff 오적용 방지**: 실제 Dense 경로가 성공했을 때만 Dense cutoff를 적용하고, Sparse Jaccard 점수에는 Dense용 cutoff를 적용하지 않는다.
+- **`tools/calibrate_min_dense_score.py` 추가**: OpenAI Dense cutoff 진단·보정 도구. 기사-룰 유사도 분포의 percentile과, 라벨이 있을 경우 F1 최적 cutoff를 탐색한다. 이 스크립트는 앱 값을 자동으로 바꾸지 않는 *측정 도구*이며, 산출된 후보값을 사용자가 사이드바 슬라이더에 수동 반영하거나 코드 기본값으로 채택할지 판단하는 데 사용한다.
+- **Streamlit Community Cloud 2차 배포 정리**: Cloud는 경량 `requirements.txt` 기준으로 배포하고, 로컬 ko-sroberta Dense/sentence-transformers/sLLM은 `requirements-sllm.txt` 기반 로컬 확장 옵션으로 분리한다.
+
+### v2.1 — 5단계 판정 농도 + 제목 가중치 + frame-level soft cap
+
+v2.1은 **점수·판정 구조를 정교화한 버전**이다. 5단계 verdict 농도, 제목·부제 가중치, `per_dim_cap=45`, frame-level soft cap, effective frame cap mitigation을 통해 *major shift 단독*과 *설명 없는 silent pivot*을 점수상 구분한다.
 
 - **5단계 verdict 농도 모델**: 3단계 신호등 → 5단계 농도 (안정적 정합 / 기준 부합 / 주의 필요 / 중점 검토 필요 / 기준 이탈). 정합성 농도를 UI에 반영
 - **제목·부제 가중치**: title 1.5 / subtitle 1.25 / body 1.0 — 제목 프레임 효과 반영, 과잉 반응 방지 (2배 미만)
@@ -470,7 +499,6 @@ context-sync.curator1/
 - **per_dim_cap 40 → 45 조정**: major shift 단독(~22.7점)과 설명 없는 silent pivot(부가 페널티가 cap을 채우며 34점 상한 수렴)을 *점수 폭으로 분리*. cap 40은 sensitive 프로파일로 격하 (default 45 / sensitive 40 / conservative 60)
 - **effective frame cap mitigation 도입**: 동일 `target_frame` 룰 다발 발화는 `frame_penalty_groups`로 묶어 점수 폭주를 막고, 설명 충실 시 `effective_frame_cap = base_frame_cap × mitigation_factor`로 부가 프레임 페널티의 최대치 자체를 낮춤
 - 3층 동시 갱신 (OWL evaluationFormula 5단계 + JSON verdict_thresholds 5단계 + per_dim_cap 45 + Python)
-- **Streamlit Community Cloud 2차 배포 정리**: Cloud는 경량 `requirements.txt` 기준으로 배포하고, Dense RAG/sentence-transformers/sLLM은 `requirements-sllm.txt` 기반 로컬 확장 옵션으로 분리
 
 ### v2.0 (이전) — 4단계 도구 출범 + baseline 정립
 
@@ -514,10 +542,11 @@ OWL + JSON + Python 3축 구조의 초기 구현. 과거/현재 두 텍스트의
 - **`conflictsWith` 관계의 임시성** — 21개 Value↔Frame 충돌 관계는 합리적 가정으로 정의된 것이지, *집단지성으로 검증된* 것이 아니다.
 - **`layer_social_meaning_proxy`는 임의 파라미터** — 본래 비전은 *집단지성의 주기적 측정*에 기반한 가중치이지만, 본 프로토타입에서는 임시 대체하고 있다. *수동 시뮬레이터로 사용자가 직접 조작 가능*하다.
 - **`dimension_weights` (0.34/0.24/0.18/0.14/0.10)와 `per_dim_cap=45`는 튜닝 파라미터** — v2.0~v2.1을 거쳐 정립된 잠정값이지만, 실측 보도 코퍼스로 검증된 값이 아니다.
+- **`min_dense_score=0.15`는 ko-sroberta 기준 잠정 cutoff** — OpenAI 임베딩(`text-embedding-3-small`)은 cosine 분포가 달라 0.15가 같은 의미를 갖지 않는다 (무관한 텍스트끼리도 상대적으로 높은 유사도가 나오는 경향). Dense-OpenAI에서는 *실측 보정 대상*이며, `tools/calibrate_min_dense_score.py`로 분포 진단(percentile) 및 라벨 기반 F1 최적 cutoff를 탐색할 수 있다. 현재는 사이드바 슬라이더로 시연 중 직접 조정한다.
 - **M04 VictimBlaming 부재** — OWL 어휘로는 존재하나 룰셋에는 미포함. 민감 도메인 가이드라인 정립 후 추가 예정.
 - **휴리스틱 ExtractedSymbol** — `audit_temporal_pair`의 기본 추출기는 *키워드 cue 기반*이라 정확도 제한적. LLM 추출 활성화 시 향상.
-- **OpenAI API 의존** (선택) — 휴리스틱으로도 작동하지만, LLM 추출 시 클라우드 API 의존. 향후 로컬 sLLM 옵션 강화 검토.
-- **웹 배포판의 범위 제한** — Streamlit Community Cloud에서는 Dense RAG/sentence-transformers/torch 기반 로컬 sLLM을 기본 포함하지 않는다. 해당 기능은 GitHub 저장소를 내려받아 로컬에서 별도 설치·실행하는 고급 옵션으로 유지한다.
+- **OpenAI API 의존** (선택) — 휴리스틱으로도 작동하지만, LLM 추출 및 Cloud Dense-OpenAI RAG는 클라우드 API에 의존. 향후 로컬 sLLM 옵션 강화 검토.
+- **웹 배포판의 Dense 엔진 차이** — Streamlit Community Cloud에서는 로컬 ko-sroberta Dense·2D 시각화·torch 기반 sLLM을 기본 포함하지 않는다. 단 Dense RAG 자체는 OpenAI 임베딩으로 대체 제공되며(키 필요), 로컬 ko-sroberta 확장은 GitHub 저장소를 내려받아 `requirements-sllm.txt`로 별도 설치·실행한다. 로컬과 Cloud의 Dense 엔진은 의미 공간이 달라 결과가 달라질 수 있다.
 
 ### 로드맵
 
@@ -542,9 +571,9 @@ OWL + JSON + Python 3축 구조의 초기 구현. 과거/현재 두 텍스트의
   - `sync_frames_with_rules` 런타임 동기화
   - JSON + OWL + Python 3층 동시 갱신 + ValueAnchor↔dimension 매핑 정합성 정리
 
-- [x] **4단계 — 기사 묶음 일괄 분석 (Streamlit, v2.0 ~ v2.1)**
+- [x] **4단계 — 기사 묶음 일괄 분석 (Streamlit, v2.0 ~ v2.2)**
   - 5차원 지표 + 1024 룰 + Plotly 시계열 sentiment 그래프 + 변곡점 마커 + RuleSchema 히트맵
-  - RAG Evidence Panel (Cloud 경량판은 Sparse 중심, 로컬 고급 모드는 Dense/Sparse 병렬 비교)
+  - RAG Evidence Panel (Sparse + Dense 병렬 비교). Dense 엔진은 환경별 이원화 — Cloud는 OpenAI 임베딩(`text-embedding-3-small`, 키 필요), 로컬 고급 모드는 ko-sroberta. cutoff 슬라이더 + `tools/calibrate_min_dense_score.py` 보정 도구
   - 수동 시뮬레이터 (5features + 5weights + 5프리셋)
   - OWL 계층 시각화 (Mermaid) + Reasoning Trace Table
   - baseline 복귀 (0.34/cap 45) + explanation mitigation 통합
@@ -559,7 +588,7 @@ OWL + JSON + Python 3축 구조의 초기 구현. 과거/현재 두 텍스트의
   - **(1) 실험 데이터셋 구축** — 같은 사건에 대한 기사 20~50개 수집 + `issue_id`로 묶기 + 사람 라벨링 (frame_effect / context_omission / victim_blaming / overall_verdict)
   - **(2) M04 VictimBlaming 룰셋 추가** — 사회적 위해성이 크고 윤리 기준이 비교적 분명. *단, 문자열 패턴만으로 판정 금지* — `"피해자도 책임이라는 주장은 부적절하다"`처럼 *비판* 문장을 *동조*로 오판할 수 있으므로 LLM/문맥 판별 조건 필수
   - **(3) 교차 매체 비교** — 단일 매체 시계열 → 같은 이슈를 여러 매체가 어떻게 다르게 다루는지 `frame_vector`로 수치화. 기사 하나는 *주관적 판단*처럼 보이지만 *여러 보도 비교*는 프레임 이탈을 분명히 드러냄
-  - **(4) Scoring profile 실험 모드** — `dimension_weights`와 `per_dim_cap`을 default(cap 45) / sensitive(cap 40) / conservative(cap 60) / 실측 보정 모드로 제공. *"정답 하나"를 주장하지 않고 평가 목적에 따라 조절*
+  - **(4) Scoring profile 실험 모드** — `dimension_weights`와 `per_dim_cap`을 default(cap 45) / sensitive(cap 40) / conservative(cap 60) / 실측 보정 모드로 제공. *"정답 하나"를 주장하지 않고 평가 목적에 따라 조절*. Dense RAG의 `min_dense_score`도 같은 맥락의 실측 보정 대상이며 `tools/calibrate_min_dense_score.py`의 분포 진단·F1 탐색 결과로 엔진별(ko-sroberta / OpenAI) cutoff를 정한다
   - **(5) `layer_social_meaning_proxy` 외부 신호 점진 반영** — 언론윤리 강령 → 심의·판례 사례 → 댓글·반응 신호 순. *댓글·반응은 "의미 기준"이 아니라 "주의 환기 신호"로만 사용* — 실시간 여론을 그대로 반영하지 않는다는 사상(조작·잡음·선동 취약성)을 보호
   - **(6) Interactive OWL graph** — streamlit-agraph로 *분석에 실제 작동한 ValueAnchor/Rule/Dimension만* 부분 그래프로 표시 (전체 그래프 X). 설명가능성 UI. 단 4단계 Mermaid Reasoning Trace로 상당 부분 충족되므로 *후순위*
 
