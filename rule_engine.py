@@ -324,7 +324,7 @@ def detect_validity_red_card(text: str) -> Dict[str, Any]:
                 "label": rule["label"],
                 "matched_text": matched,
                 "pattern": pat,
-                "reason": f"Stage 0 validity red-card: {rule['label']} — '{matched}'",
+                "reason": f"Stage 0 자격 위반(red-card): {rule['label']} — '{matched}'",
             }
     return {"violation": False}
 
@@ -879,7 +879,7 @@ def audit_temporal_pair(
         frame = symbol.get("detected_frame")
         if frame and frame != "None" and frame not in active_frames:
             frame_sync_notes.append(
-                f"[frame sync] {label} detected_frame '{frame}' is not in JSON active_frames → coerced to 'None'."
+                f"[프레임 동기화] {label} detected_frame '{frame}' 가 JSON active_frames에 없어 → 'None'으로 보정."
             )
             symbol["detected_frame"] = "None"
 
@@ -901,10 +901,10 @@ def audit_temporal_pair(
         """_distribute()가 반환한 설명 문자열을 trace table용 dimension 텍스트로 정리한다."""
         if not dim_note:
             return "—"
-        if "calibrated:" in dim_note:
-            return dim_note.split("calibrated:", 1)[1].strip()
-        if "fallback:" in dim_note:
-            return dim_note.split("fallback:", 1)[1].strip() + " (fallback)"
+        if "보정 차원:" in dim_note:
+            return dim_note.split("보정 차원:", 1)[1].strip()
+        if "폴백 차원:" in dim_note:
+            return dim_note.split("폴백 차원:", 1)[1].strip() + " (fallback)"
         return dim_note.strip(" →")
 
     def _append_trace(
@@ -940,7 +940,7 @@ def audit_temporal_pair(
         report["score"] = 0.0
         report["anchor_verdict"] = "기준 이탈"
         report["details"]["validity_red_card"] = pair_red_card
-        report["reasons"].append(pair_red_card.get("reason", "Stage 0 validity red-card"))
+        report["reasons"].append(pair_red_card.get("reason", "Stage 0 자격 위반(red-card)"))
         report["trace_events"].extend(build_validity_trace(pair_red_card))
         return report
 
@@ -950,7 +950,7 @@ def audit_temporal_pair(
     report["details"]["explanation_mitigation"] = explanation_mitigation
     if explanation_mitigation["mitigation_factor"] < 1.0:
         msg = (
-            f"Explanation mitigation active ({explanation_mitigation['level']}): "
+            f"설명 완화 활성 ({explanation_mitigation['level']}): "
             f"signal={explanation_mitigation['explanation_signal']}, "
             f"factor={explanation_mitigation['mitigation_factor']} — {explanation_mitigation['reason']}"
         )
@@ -972,7 +972,7 @@ def audit_temporal_pair(
             return penalty
         mitigated = round(float(penalty) * factor, 1)
         report["reasons"].append(
-            f"Explanation mitigation applied to {reason}: {penalty:.1f} → {mitigated:.1f} "
+            f"설명 완화 적용 ({reason}): {penalty:.1f} → {mitigated:.1f} "
             f"(factor={factor})"
         )
         return mitigated
@@ -1000,7 +1000,7 @@ def audit_temporal_pair(
         label = describe_temporal_shift(polarity_shift)
         report["reasons"].append(
             f"{label}: {past['stance_polarity']:+.2f} → {present['stance_polarity']:+.2f} "
-            f"(Δ={polarity_shift:.2f}, penalty={temporal_penalty:.1f}) → temporal_shift"
+            f"(Δ={polarity_shift:.2f}, penalty={temporal_penalty:.1f}) → 차원: temporal_shift"
         )
         _append_trace(
             "Stage 2: Polarity",
@@ -1024,25 +1024,25 @@ def audit_temporal_pair(
         if not dims:
             if "frame_effect" in report["dimension_breakdown"]:
                 report["dimension_breakdown"]["frame_effect"] += penalty
-                return " → fallback: frame_effect"
+                return " → 폴백 차원: frame_effect"
             return ""
         per_dim = penalty / len(dims)
         for d in dims:
             if d in report["dimension_breakdown"]:
                 report["dimension_breakdown"][d] += per_dim
-        return f" → calibrated: {', '.join(dims)}"
+        return f" → 보정 차원: {', '.join(dims)}"
 
     # 3a. 과거 가치 ↔ 현재 프레임 충돌 (cross-temporal)
     if past["promoted_value"] and present["detected_frame"] and present["detected_frame"] != "None":
         if check_value_frame_conflict(graph, past["promoted_value"], present["detected_frame"]):
             report["logic_conflict"] = True
             penalty = compute_graph_penalty(25.0, polarity_shift, floor_factor=0.65)
-            penalty = _mitigate_penalty(penalty, "cross-temporal graph conflict")
+            penalty = _mitigate_penalty(penalty, "교차시점 그래프 충돌")
             report["logic_score"] += penalty
             dim_note = _distribute(past["promoted_value"], penalty)
             report["reasons"].append(
-                f"OWL graph conflict (cross-temporal): PAST value '{past['promoted_value']}' "
-                f"↔ PRESENT frame '{present['detected_frame']}' "
+                f"OWL 그래프 충돌(교차시점): 과거 가치 '{past['promoted_value']}' "
+                f"↔ 현재 프레임 '{present['detected_frame']}' "
                 f"(penalty={penalty:.1f}){dim_note}"
             )
             _append_trace(
@@ -1062,8 +1062,8 @@ def audit_temporal_pair(
             report["logic_score"] += penalty
             dim_note = _distribute(present["promoted_value"], penalty)
             report["reasons"].append(
-                f"OWL graph conflict (self-contradictory): PRESENT value '{present['promoted_value']}' "
-                f"↔ PRESENT frame '{present['detected_frame']}' (penalty={penalty:.1f}){dim_note}"
+                f"OWL 그래프 충돌(자기모순): 현재 가치 '{present['promoted_value']}' "
+                f"↔ 현재 프레임 '{present['detected_frame']}' (penalty={penalty:.1f}){dim_note}"
             )
             _append_trace(
                 "Stage 3a-self: Graph (self-contradiction)",
@@ -1079,12 +1079,12 @@ def audit_temporal_pair(
     if past["promoted_value"] != present["promoted_value"]:
         if check_value_reinforces(graph, past["promoted_value"], present["promoted_value"]):
             penalty = compute_graph_penalty(3.0, polarity_shift, floor_factor=0.50)
-            penalty = _mitigate_penalty(penalty, "reinforced value emphasis shift")
+            penalty = _mitigate_penalty(penalty, "강화 관계 내 강조 이동")
             report["logic_score"] += penalty
             _distribute(past["promoted_value"], penalty / 2)
             _distribute(present["promoted_value"], penalty - penalty / 2)
             report["reasons"].append(
-                f"Value emphasis shift (within reinforcement): "
+                f"가치 강조 이동(강화 관계 내): "
                 f"{past['promoted_value']} ↔ {present['promoted_value']} (penalty={penalty:.1f})"
             )
             _append_trace(
@@ -1098,11 +1098,11 @@ def audit_temporal_pair(
             )
         else:
             penalty = compute_graph_penalty(12.0, polarity_shift, floor_factor=0.50)
-            penalty = _mitigate_penalty(penalty, "unreinforced value shift")
+            penalty = _mitigate_penalty(penalty, "비강화 가치 이동")
             report["logic_score"] += penalty
             dim_note = _distribute(past["promoted_value"], penalty)
             report["reasons"].append(
-                f"Value shift (no OWL reinforces relation): "
+                f"가치 이동(OWL reinforces 관계 없음): "
                 f"{past['promoted_value']} → {present['promoted_value']} "
                 f"(penalty={penalty:.1f}){dim_note}"
             )
@@ -1149,7 +1149,7 @@ def audit_temporal_pair(
             r.get("dimension") in {"temporal_shift", "context_omission"}
             or r.get("target_frame") in explanation_sensitive_frames
         ):
-            penalty = _mitigate_penalty(penalty, f"rule {r.get('rule_id', '?')}")
+            penalty = _mitigate_penalty(penalty, f"룰 {r.get('rule_id', '?')}")
             r["raw_axiom_penalty"] = raw_penalty
             r["axiom_penalty"] = penalty
             r["explanation_mitigation_factor"] = explanation_mitigation.get("mitigation_factor", 1.0)
@@ -1175,7 +1175,7 @@ def audit_temporal_pair(
     if report["fired_rules"]:
         rule_ids = [r["rule_id"] for r in report["fired_rules"]]
         report["reasons"].append(
-            f"Fired {len(rule_ids)} rules: {', '.join(str(x) for x in rule_ids[:5])}"
+            f"발화 룰 {len(rule_ids)}개: {', '.join(str(x) for x in rule_ids[:5])}"
             f"{'...' if len(rule_ids) > 5 else ''}"
         )
 
@@ -1220,14 +1220,14 @@ def audit_temporal_pair(
     logic_abs = abs(report["logic_score"])
     if logic_abs > dim_total + 0.5:
         report["reasons"].append(
-            f"[warning] logic_score 미반영 {logic_abs - dim_total:.1f}점 발생. "
+            f"[경고] logic_score 미반영 {logic_abs - dim_total:.1f}점 발생. "
             "dimension_breakdown 연결 확인 필요."
         )
 
     report["score"] = max(0, round(100 - weighted_distortion + report["validity_score"], 1))
 
     if not report["reasons"]:
-        report["reasons"].append("No significant temporal coherence violations detected.")
+        report["reasons"].append("유의미한 시점 일관성 위반이 감지되지 않았습니다.")
 
     return report
 
@@ -1326,14 +1326,14 @@ def compute_temporal_shift_penalty(
 def describe_temporal_shift(polarity_shift: float) -> str:
     """리포트 reason에 사용할 시계열 변화 강도 라벨."""
     if polarity_shift >= 1.25:
-        return "Full-scale stance reversal"
+        return "전면적 입장 반전"
     if polarity_shift >= 1.0:
-        return "Major stance reversal"
+        return "주요 입장 반전"
     if polarity_shift >= 0.5:
-        return "Significant stance shift"
+        return "유의미한 입장 이동"
     if polarity_shift >= 0.25:
-        return "Moderate stance shift"
-    return "No significant shift"
+        return "중간 정도 입장 이동"
+    return "유의미한 변화 없음"
 
 
 def compute_rule_penalty(
@@ -1751,7 +1751,7 @@ def build_reasoning_trace(audit: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # ─── Stage 3b: Value shift (reinforces or no relation) ───
     for r in reasons:
-        if "Value emphasis shift" in r:
+        if "가치 강조 이동" in r:
             import re as _re
             m = _re.search(r"penalty=(-?[\d.]+)", r)
             penalty = float(m.group(1)) if m else 0
@@ -1765,11 +1765,11 @@ def build_reasoning_trace(audit: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "detail": "강화 관계 안에서의 강조점 이동 (가벼운 페널티)",
             })
             break
-        elif "Value shift" in r and "no OWL reinforces" in r:
+        elif "가치 이동" in r and "reinforces 관계 없음" in r:
             import re as _re
             m = _re.search(r"penalty=(-?[\d.]+)", r)
             penalty = float(m.group(1)) if m else 0
-            dims_m = _re.search(r"calibrated dimensions: ([^)]+)", r)
+            dims_m = _re.search(r"보정 차원: ([^)]+)", r)
             calibrated = dims_m.group(1).strip() if dims_m else "frame_effect (fallback)"
             trace.append({
                 "stage": "Stage 3b: Graph (value shift)",
@@ -1885,7 +1885,7 @@ def analyze_pipeline(
     if red_card.get("violation"):
         zero_breakdown = {d: 0.0 for d in DIMENSIONS}
         validity_trace = build_validity_trace(red_card)
-        verdict_reason = red_card.get("reason", "Stage 0 validity red-card")
+        verdict_reason = red_card.get("reason", "Stage 0 자격 위반(red-card)")
         return {
             "features": features,
             "weights": weights,
@@ -1922,7 +1922,7 @@ def analyze_pipeline(
             "graph_audits": [],
             "primary_graph_audit": None,
             "polarity_shift": 0.0,
-            "polarity_shift_label": "Skipped by validity red-card",
+            "polarity_shift_label": "자격 위반(red-card)으로 생략",
             "temporal_penalty": 0.0,
             "dimension_breakdown": zero_breakdown,
             "axiom_distortion": 100.0,

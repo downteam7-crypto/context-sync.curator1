@@ -796,6 +796,505 @@ def _compact_graph_audit_for_llm(audit: dict, max_trace_rows: int = 12, max_rule
     }
 
 
+# ─────────────────────────────────────────────────────────────
+# audit reasons compact 렌더러
+#   rule_engine가 매칭 룰마다 찍는
+#   "설명 완화 적용 (룰 R###): A → B (factor=F)"
+#   줄은 rule_id만 다르고 포맷이 동일해 길게 늘어진다.
+#   (before, after, factor)가 같은 것끼리 묶어 한 줄/표로 접고,
+#   그 외 의미 있는 서술형 reason은 불릿으로 둔다.
+# ─────────────────────────────────────────────────────────────
+_MITI_RULE_PAT = re.compile(
+    r"설명 완화 적용 \(룰\s+(?P<rid>\S+?)\):\s*"
+    r"(?P<before>-?\d+(?:\.\d+)?)\s*(?:→|->)\s*(?P<after>-?\d+(?:\.\d+)?)\s*"
+    r"\(factor=(?P<factor>-?\d+(?:\.\d+)?)\)"
+)
+
+
+def _short_rule_ids(rule_ids, max_inline: int = 8) -> str:
+    """룰 ID가 너무 길게 늘어지지 않도록 앞부분만 인라인 표시한다."""
+    ids = [str(r) for r in (rule_ids or []) if str(r)]
+    if not ids:
+        return "-"
+    shown = ids[:max_inline]
+    suffix = f" 외 {len(ids) - max_inline}개" if len(ids) > max_inline else ""
+    return ", ".join(f"`{r}`" for r in shown) + suffix
+
+
+def build_dimension_contribution_df(
+    breakdown: dict,
+    weights: dict,
+    *,
+    per_dim_cap: float = PER_DIM_CAP,
+) -> pd.DataFrame:
+    """차원별 raw penalty를 최종 distortion 기여도 기준으로 정렬한다."""
+    rows = []
+    for dim in DIMENSIONS:
+        raw_penalty = float((breakdown or {}).get(dim, 0) or 0)
+        normalized = min(100.0, abs(raw_penalty) / max(float(per_dim_cap), 1e-9) * 100.0)
+        weight = float((weights or {}).get(dim, 0) or 0)
+        contribution = normalized * weight
+        rows.append({
+            "dimension": dim,
+            "누적 페널티": round(raw_penalty, 1),
+            "정규화": round(normalized, 1),
+            "가중치": round(weight, 3),
+            "기여 distortion": round(contribution, 2),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values(["기여 distortion", "정규화"], ascending=False).reset_index(drop=True)
+    return df
+
+
+def render_dimension_contribution(
+    breakdown: dict,
+    weights: dict,
+    *,
+    heading: str = "차원별 기여도",
+    per_dim_cap: float = PER_DIM_CAP,
+    expanded_detail: bool = False,
+) -> pd.DataFrame:
+    """차원 breakdown을 '무엇이 점수를 깎았는가' 순서로 보여준다."""
+    df = build_dimension_contribution_df(breakdown, weights, per_dim_cap=per_dim_cap)
+    if df.empty:
+        return df
+    st.markdown(f"**{heading}**")
+    top = df.iloc[0]
+    if float(top.get("기여 distortion", 0) or 0) > 0:
+        st.caption(
+            f"가장 큰 기여 차원: `{top['dimension']}` "
+            f"({top['기여 distortion']:.2f}점, 정규화 {top['정규화']:.1f})"
+        )
+    st.dataframe(df, width="stretch", hide_index=True)
+    try:
+        contrib_total = float(df["기여 distortion"].sum())
+        if contrib_total > 100.0:
+            st.caption(
+                f"※ 기여도 합 {contrib_total:.1f} — 최종 왜곡도는 100으로 클리핑되므로 "
+                "표시된 점수와 합이 다를 수 있습니다(원인 비중 파악용)."
+            )
+    except Exception:
+        pass
+    try:
+        st.bar_chart(df.set_index("dimension")["기여 distortion"])
+    except Exception:
+        pass
+    return df
+
+
+def _group_fired_rules_for_display(
+    fired_rules: list[dict],
+    frame_groups: list[dict] | None = None,
+) -> pd.DataFrame:
+    """actual fired_rules를 frame/dimension 단위로 접은 요약표를 만든다.
+
+    rule_engine이 만든 frame_penalty_groups가 있으면 그것을 우선 사용한다. 없으면
+    fired_rules에서 최소 집계만 수행한다. UI에서는 signed penalty와 양수 감점량을
+    분리해, 엔진 내부 부호와 사용자 해석이 섞이지 않게 한다.
+    """
+    def _safe_float(value, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    fired_rules = fired_rules or []
+    frame_groups = frame_groups or []
+    rows = []
+
+    if frame_groups:
+        for g in frame_groups:
+            rule_ids = [str(x) for x in (g.get("rule_ids") or [])]
+            raw_sum = round(_safe_float(g.get("raw_rule_sum")), 1)
+            applied = round(_safe_float(g.get("capped_penalty")), 1)
+            suppressed_signed = _safe_float(g.get("suppressed_penalty", raw_sum - applied))
+            rows.append({
+                "frame": g.get("target_frame", "Unknown"),
+                "dimension": g.get("dimension", ""),
+                "룰 수": int(g.get("rule_count", len(rule_ids)) or 0),
+                "raw 합계(signed)": raw_sum,
+                "반영 페널티(signed)": applied,
+                "왜곡 반영량(+)": round(abs(applied), 1),
+                "soft cap": round(_safe_float(g.get("effective_frame_cap", g.get("frame_soft_cap", 0))), 1),
+                "감쇄량(+)": round(abs(suppressed_signed), 1),
+                "완화 factor": round(_safe_float(g.get("cap_mitigation_factor", 1.0), 1.0), 2),
+                "대표 룰": g.get("representative_rule_id", ""),
+                "rule_ids": rule_ids,
+            })
+    else:
+        buckets: dict[tuple[str, str], list[dict]] = {}
+        for r in fired_rules:
+            key = (str(r.get("target_frame") or "Unknown"), str(r.get("dimension") or ""))
+            buckets.setdefault(key, []).append(r)
+        for (frame, dim), rules in buckets.items():
+            rule_ids = [str(r.get("rule_id", "?")) for r in rules]
+            raw_sum = sum(_safe_float(r.get("axiom_penalty")) for r in rules)
+            rows.append({
+                "frame": frame,
+                "dimension": dim,
+                "룰 수": len(rules),
+                "raw 합계(signed)": round(raw_sum, 1),
+                "반영 페널티(signed)": round(raw_sum, 1),
+                "왜곡 반영량(+)": round(abs(raw_sum), 1),
+                "soft cap": "-",
+                "감쇄량(+)": "-",
+                "완화 factor": "-",
+                "대표 룰": rule_ids[0] if rule_ids else "",
+                "rule_ids": rule_ids,
+            })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["abs_penalty"] = df["왜곡 반영량(+)"].apply(lambda v: abs(float(v)) if isinstance(v, (int, float)) else 0)
+        df = df.sort_values(["abs_penalty", "룰 수"], ascending=False).drop(columns=["abs_penalty"]).reset_index(drop=True)
+    return df
+
+def render_fired_rules_grouped(
+    fired_rules: list[dict],
+    *,
+    frame_groups: list[dict] | None = None,
+    heading: str = "actual axiom fired_rules",
+    expanded_detail: bool = False,
+) -> None:
+    """중복 많은 fired_rules를 frame 단위 요약 -> 상세 접힘 구조로 표시한다."""
+    fired_rules = fired_rules or []
+    if not fired_rules:
+        return
+
+    grouped = _group_fired_rules_for_display(fired_rules, frame_groups=frame_groups)
+    st.markdown(f"**{heading} ({len(fired_rules)}개 룰, {len(grouped)}개 프레임 묶음)**")
+    if grouped.empty:
+        return
+
+    st.caption(
+        "`signed` 값은 엔진 내부 페널티 부호를 유지한 값입니다. 사용자가 읽을 때는 `왜곡 반영량(+)`과 "
+        "`감쇄량(+)`을 보면, soft cap으로 실제 점수 반영이 얼마나 줄었는지 바로 볼 수 있습니다."
+    )
+    summary_df = grouped.copy()
+    summary_df["룰 ID 요약"] = summary_df["rule_ids"].apply(lambda ids: _short_rule_ids(ids, max_inline=5))
+    st.dataframe(summary_df.drop(columns=["rule_ids"], errors="ignore"), width="stretch", hide_index=True)
+
+    top = grouped.iloc[0]
+    st.caption(
+        f"핵심 묶음: `{top.get('frame')}` / `{top.get('dimension')}` — "
+        f"룰 {int(top.get('룰 수', 0))}개, 왜곡 반영량 +{top.get('왜곡 반영량(+)')} "
+        f"(signed {top.get('반영 페널티(signed)')}, 감쇄량 +{top.get('감쇄량(+)')})"
+    )
+
+    with st.expander("발화 룰 ID와 원본 룰 상세 보기", expanded=expanded_detail):
+        id_rows = []
+        for _, row in grouped.iterrows():
+            id_rows.append({
+                "frame": row.get("frame"),
+                "dimension": row.get("dimension"),
+                "룰 수": row.get("룰 수"),
+                "rule_ids": ", ".join(row.get("rule_ids") or []),
+            })
+        st.dataframe(pd.DataFrame(id_rows), width="stretch", hide_index=True)
+
+        raw_df = pd.DataFrame([
+            {
+                "rule_id": r.get("rule_id"),
+                "frame": r.get("target_frame", ""),
+                "dimension": r.get("dimension", ""),
+                "penalty(signed)": r.get("axiom_penalty"),
+                "penalty_abs": abs(float(r.get("axiom_penalty", 0) or 0)),
+                "intensity": r.get("intensity"),
+                "strength": r.get("rule_strength"),
+                "schema_id": r.get("schema_id", ""),
+                "severity": r.get("severity_band", r.get("severity", "")),
+            }
+            for r in fired_rules
+        ])
+        if not raw_df.empty:
+            st.dataframe(raw_df, width="stretch", hide_index=True)
+
+def _stage_ko(stage: str) -> str:
+    """원본 trace의 영어 stage 라벨을 표시용 한국어로 매핑한다(엔진 비침습)."""
+    s = str(stage or "")
+    if "Frame sync" in s:
+        return "0. 프레임 동기화"
+    if "Validity" in s or "Red Card" in s or "red-card" in s or "자격" in s:
+        return "0. 자격 심사"
+    if "Explanation" in s or "설명" in s:
+        return "1.5 설명 완화"
+    if "Polarity" in s:
+        return "2. 시계열 변화"
+    if "self" in s.lower() and "Graph" in s:
+        return "3a. 자기모순 검사"
+    if "cross-temporal" in s:
+        return "3a. 교차시점 그래프"
+    if "value shift" in s or "Graph" in s:
+        return "3b. 가치구조 이동"
+    if "Rule" in s:
+        return "4. 룰/페널티 반영"
+    if "/" in s:
+        return "통합 단계(2/3a/3b/4)"
+    return s
+
+
+def _trace_bucket(stage: str) -> str:
+    """trace stage를 요약 버킷으로 분류한다.
+
+    엔진 stage가 영어로 남아 있든, 나중에 한국어로 바뀌든 표시용 canonical label을
+    먼저 만든 뒤 분류한다. 이러면 렌더링 계층의 한국어화와 요약 버킷이 같이 움직인다.
+    """
+    raw = str(stage or "")
+    label = _stage_ko(raw)
+    s = f"{raw} {label}"
+    if "자격" in label or "Validity" in s or "Red" in s or "Stage 0" in s:
+        return "0. 자격/전처리"
+    if "설명" in label or "Explanation" in s:
+        return "1. 설명 완화"
+    if "시계열" in label or "Polarity" in s:
+        return "2. 시계열 변화"
+    if "가치구조" in label or "자기모순" in label or "교차시점" in label or "Graph" in s or "OWL" in s or "value" in s:
+        return "3. OWL 가치구조"
+    if "룰/페널티" in label or "Rule" in s:
+        return "4. 룰/페널티 반영"
+    return "기타"
+
+def render_reasoning_trace_compact(trace: list[dict], *, expanded_detail: bool = False) -> None:
+    """긴 reasoning trace를 3~4개 단계 요약으로 먼저 보여주고 원표는 접는다."""
+    trace = trace or []
+    if not trace:
+        return
+
+    buckets: dict[str, list[dict]] = {}
+    for row in trace:
+        buckets.setdefault(_trace_bucket(row.get("stage", "")), []).append(row)
+
+    order = ["0. 자격/전처리", "1. 설명 완화", "2. 시계열 변화", "3. OWL 가치구조", "4. 룰/페널티 반영", "기타"]
+    summary_rows = []
+    for bucket in order:
+        items = buckets.get(bucket, [])
+        if not items:
+            continue
+        penalties = []
+        for x in items:
+            try:
+                penalties.append(float(x.get("penalty", 0) or 0))
+            except Exception:
+                pass
+        total_penalty = round(sum(penalties), 1) if penalties else 0.0
+        top_item = max(items, key=lambda x: abs(float(x.get("penalty", 0) or 0)) if isinstance(x.get("penalty", 0), (int, float)) else 0)
+        dims = sorted({str(x.get("calibrated_dimension", "")) for x in items if x.get("calibrated_dimension")})
+        rule_count = sum(len(x.get("rule_ids") or []) for x in items)
+        summary_rows.append({
+            "단계": bucket,
+            "행 수": len(items),
+            "주요 trigger/detail": top_item.get("detail") or top_item.get("trigger", ""),
+            "차원": ", ".join(dims[:3]) + ("..." if len(dims) > 3 else ""),
+            "페널티 합": total_penalty,
+            "연결 룰": rule_count if rule_count else "-",
+        })
+
+    st.markdown("**🧬 판단 과정 요약**")
+    st.caption("긴 trace 표를 먼저 읽기 쉬운 단계 요약으로 접었습니다. 원본 trace는 아래 펼치기에서 확인할 수 있습니다.")
+    st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
+
+    with st.expander("원본 OWL Reasoning Trace 전체표 보기", expanded=expanded_detail):
+        raw_trace_df = pd.DataFrame(trace)
+        if "stage" in raw_trace_df.columns:
+            raw_trace_df.insert(0, "단계", raw_trace_df["stage"].apply(_stage_ko))
+        st.dataframe(raw_trace_df, width="stretch", hide_index=True)
+
+
+def render_executive_summary(result: dict, graph_audits: list[dict] | None = None) -> None:
+    """면접/시연용 30초 요약 블록."""
+    def _fmt_num(value, digits: int = 2) -> str:
+        try:
+            return f"{float(value):.{digits}f}"
+        except Exception:
+            return "-"
+
+    graph_audits = graph_audits or []
+    main_audit = result.get("primary_graph_audit") or (graph_audits[0] if graph_audits else {})
+    coherence = float(result.get("coherence_score", 0) or 0)
+    distortion = float(result.get("axiom_distortion", 0) or 0)
+    verdict = result.get("axiom_verdict", "-")
+
+    st.subheader("1. 핵심 요약")
+    st.info(f"정합성 점수 **{coherence:.1f}점** / 왜곡도 **{distortion:.1f}점** — **{verdict}**")
+
+    if main_audit:
+        details = main_audit.get("details", {}) or {}
+        past_signal = details.get("past", {}) or {}
+        present_signal = details.get("present", {}) or {}
+        past_article = main_audit.get("past_article", {}) or {}
+        present_article = main_audit.get("present_article", {}) or {}
+        group_key = main_audit.get("_group_key") or result.get("primary_group_key") or "-"
+        pair_label = main_audit.get("_pair_label", "first→last")
+        past_date = past_article.get("date", "")
+        present_date = present_article.get("date", "")
+        delta = None
+        try:
+            if past_signal.get("stance_polarity") is not None and present_signal.get("stance_polarity") is not None:
+                delta = abs(float(present_signal.get("stance_polarity")) - float(past_signal.get("stance_polarity")))
+        except Exception:
+            delta = None
+        delta_txt = f", polarity Δ={delta:.2f}" if delta is not None else ""
+        st.caption(
+            f"대표 변곡 구간: `{group_key}` · `{pair_label}` · "
+            f"{past_date or '?'} → {present_date or '?'}{delta_txt}. "
+            "대표 audit은 엔진의 `primary_graph_audit`을 우선 사용합니다."
+        )
+        shift_cols = st.columns(2)
+        with shift_cols[0]:
+            st.markdown("**이전 신호**")
+            st.caption(_short_text(past_article.get("title", ""), 140) or "-")
+            st.caption(
+                f"promoted_value=`{past_signal.get('promoted_value', '-')}` · "
+                f"frame=`{past_signal.get('detected_frame', '-')}` · "
+                f"polarity={_fmt_num(past_signal.get('stance_polarity'), 2)}"
+            )
+        with shift_cols[1]:
+            st.markdown("**현재 신호**")
+            st.caption(_short_text(present_article.get("title", ""), 140) or "-")
+            st.caption(
+                f"promoted_value=`{present_signal.get('promoted_value', '-')}` · "
+                f"frame=`{present_signal.get('detected_frame', '-')}` · "
+                f"polarity={_fmt_num(present_signal.get('stance_polarity'), 2)}"
+            )
+
+    causes = []
+    bd_df = build_dimension_contribution_df(
+        result.get("dimension_breakdown", {}),
+        result.get("weights", {}),
+    )
+    for _, row in bd_df.head(3).iterrows():
+        if float(row.get("기여 distortion", 0) or 0) > 0.05:
+            causes.append(
+                f"`{row['dimension']}` 기여 {row['기여 distortion']:.2f}점 "
+                f"(raw {row['누적 페널티']:.1f})"
+            )
+
+    top_frames = []
+    if main_audit:
+        frame_df = _group_fired_rules_for_display(
+            main_audit.get("fired_rules", []),
+            frame_groups=main_audit.get("frame_penalty_groups", []),
+        )
+        for _, row in frame_df.head(3).iterrows():
+            if int(row.get("룰 수", 0) or 0) > 0:
+                top_frames.append(
+                    f"`{row.get('frame')}` {int(row.get('룰 수', 0))}개 룰 "
+                    f"(+{row.get('왜곡 반영량(+)')}, signed {row.get('반영 페널티(signed)')})"
+                )
+
+    mitigation = (main_audit.get("details", {}) or {}).get("explanation_mitigation") if main_audit else None
+    mitigations = []
+    if mitigation:
+        factor = float(mitigation.get("mitigation_factor", 1.0) or 1.0)
+        if factor < 1.0:
+            mitigations.append(
+                f"설명 완화 `{mitigation.get('level')}` 적용: factor={factor}, "
+                f"{mitigation.get('reason')}"
+            )
+        else:
+            mitigations.append("설명 완화 신호가 약하거나 없음")
+
+    c_left, c_mid, c_right = st.columns(3)
+    with c_left:
+        st.markdown("**주요 감점 원인**")
+        if causes:
+            for item in causes:
+                st.markdown(f"- {item}")
+        else:
+            st.caption("뚜렷한 감점 차원이 없습니다.")
+    with c_mid:
+        st.markdown("**주요 발화 프레임**")
+        if top_frames:
+            for item in top_frames:
+                st.markdown(f"- {item}")
+        else:
+            st.caption("actual fired_rules가 없거나 graph audit이 불가능했습니다.")
+    with c_right:
+        st.markdown("**완화/주의 요소**")
+        if result.get("validity_violation"):
+            st.error("Stage 0 red-card로 최종 점수가 override되었습니다.")
+        if mitigations:
+            for item in mitigations:
+                st.markdown(f"- {item}")
+        else:
+            st.caption("별도 완화 신호가 없습니다.")
+
+def render_audit_reasons_compact(reasons, *, heading: str) -> None:
+    """audit reasons를 '공통값 접기 + 서술형 불릿'으로 압축 렌더링한다."""
+    reasons = [str(r) for r in (reasons or [])]
+    if not reasons:
+        return
+
+    miti: list[dict] = []
+    narrative: list[str] = []
+    for r in reasons:
+        m = _MITI_RULE_PAT.search(r)
+        if m:
+            miti.append({
+                "rule_id": m.group("rid"),
+                "before": float(m.group("before")),
+                "after": float(m.group("after")),
+                "factor": float(m.group("factor")),
+            })
+        else:
+            narrative.append(r)
+
+    st.markdown(f"**{heading} ({len(reasons)}건)**")
+
+    # 1) 서술형 reason — 같은 문구가 반복되면 count로 접는다.
+    if narrative:
+        from collections import Counter
+        counts = Counter(narrative)
+        for r, count in counts.items():
+            suffix = f" × {count}" if count > 1 else ""
+            st.markdown(f"- {r}{suffix}")
+
+    # 2) 룰 완화 reason — (전/후/factor)가 같은 묶음으로 접고 rule_id는 접힘 처리
+    if miti:
+        groups: dict[tuple, list[str]] = {}
+        for m in miti:
+            groups.setdefault((m["before"], m["after"], m["factor"]), []).append(m["rule_id"])
+
+        st.caption(f"🔧 설명 완화 적용 룰 {len(miti)}개 — 동일 포맷 접기 ({len(groups)}종)")
+        group_rows = []
+        for (before, after, factor), rids in groups.items():
+            group_rows.append({
+                "factor": factor,
+                "전(前)": round(before, 1),
+                "후(後)": round(after, 1),
+                "룰 수": len(rids),
+                "룰 ID 요약": _short_rule_ids(rids, max_inline=5),
+                "rule_ids": rids,
+            })
+        mdf = pd.DataFrame(group_rows).sort_values(["룰 수", "전(前)"], ascending=False)
+        display_df = mdf.drop(columns=["rule_ids"], errors="ignore")
+        if len(display_df) == 1:
+            row = display_df.iloc[0]
+            st.markdown(
+                f"- 설명 완화: `factor={row['factor']}` · "
+                f"`{row['전(前)']:.1f} → {row['후(後)']:.1f}` — "
+                f"**룰 {int(row['룰 수'])}개**"
+            )
+        else:
+            if display_df["factor"].nunique() == 1:
+                st.caption(f"📌 공통 factor: `{display_df['factor'].iloc[0]}`")
+                display_df = display_df.drop(columns=["factor"])
+            st.dataframe(display_df, width="stretch", hide_index=True)
+
+        with st.expander("설명 완화 적용 rule_id 전체 보기", expanded=False):
+            id_df = pd.DataFrame([
+                {
+                    "factor": row["factor"],
+                    "전→후": f"{row['전(前)']:.1f} → {row['후(後)']:.1f}",
+                    "룰 수": row["룰 수"],
+                    "rule_ids": ", ".join(row["rule_ids"]),
+                }
+                for _, row in mdf.iterrows()
+            ])
+            st.dataframe(id_df, width="stretch", hide_index=True)
+
+
 def generate_owl_graph_audit_llm_summary(
     audit: dict,
     model_name: str,
@@ -912,15 +1411,6 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
         grouped.setdefault(key, []).append(r)
         overview_rows.append(_candidate_rule_row(r))
 
-    overview_df = pd.DataFrame(overview_rows)
-    if not overview_df.empty:
-        preferred_cols = [
-            "rule_id", "fired", "schema", "frame", "dimension", "context", "profile", "severity",
-            "value_anchor", "axiom_penalty", "strength", "intensity", "positive_cues", "negative_indicators",
-        ]
-        st.markdown("**B-1. 후보 룰 요약표 — feature activation 기준, 룰별 차이 중심**")
-        st.dataframe(overview_df[[c for c in preferred_cols if c in overview_df.columns]], width="stretch", hide_index=True)
-
     group_summary = []
     for (schema_id, frame, dimension), ruleset in grouped.items():
         penalties = [float(r.get("axiom_penalty", 0) or 0) for r in ruleset]
@@ -937,8 +1427,18 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
             "profiles": ", ".join(profiles[:4]) + (f" 외 {len(profiles)-4}개" if len(profiles) > 4 else ""),
             "severities": ", ".join(severities),
         })
-    st.markdown("**B-2. Schema/Frame 묶음 요약 — 다중 프레임 신호 요약**")
+    st.markdown("**B-1. Schema/Frame 묶음 요약 — candidate_rules 접힘 전 대표표**")
+    st.caption("후보 룰은 최종 점수의 직접 근거가 아니므로, 기본 화면에서는 묶음 요약만 먼저 보여줍니다.")
     st.dataframe(pd.DataFrame(group_summary), width="stretch", hide_index=True)
+
+    overview_df = pd.DataFrame(overview_rows)
+    if not overview_df.empty:
+        preferred_cols = [
+            "rule_id", "fired", "schema", "frame", "dimension", "context", "profile", "severity",
+            "value_anchor", "axiom_penalty", "strength", "intensity", "positive_cues", "negative_indicators",
+        ]
+        with st.expander("B-2. 후보 룰 전체 행 보기 — feature activation 기준", expanded=False):
+            st.dataframe(overview_df[[c for c in preferred_cols if c in overview_df.columns]], width="stretch", hide_index=True)
 
     sorted_groups = sorted(
         grouped.items(),
@@ -946,15 +1446,16 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
         reverse=True,
     )
 
+    st.markdown("**B-3. Schema/Frame별 상세 — 기본 접힘**")
     for (schema_id, frame, dimension), ruleset in sorted_groups:
         first = ruleset[0]
         fired_count = sum(1 for r in ruleset if bool(r.get("is_fired")))
         diff_fields = _diff_fields_for_rules(ruleset)
         with st.expander(
             f"🧩 {schema_id} / {frame} / {dimension} — {len(ruleset)}개 후보, fired {fired_count}개",
-            expanded=fired_count > 0,
+            expanded=False,
         ):
-            st.markdown("**B-3. 공통 프레임/스키마 설명 — feature activation 후보 룰 기준**")
+            st.markdown("**공통 프레임/스키마 설명 — feature activation 후보 룰 기준**")
             if first.get("frame_definition_ko"):
                 st.write(f"- 프레임 정의: {first.get('frame_definition_ko')}")
             if first.get("schema_description_ko"):
@@ -992,7 +1493,6 @@ def render_candidate_rule_explanations(candidate_rules: list[dict], sllm_meta: O
                 "따라서 이 표에서는 각 rule_id가 어떤 맥락(context), 프로필(profile), 강도(severity), "
                 "cue/indicator 조합으로 달라지는지를 중심으로 읽으면 됩니다."
             )
-
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["기사 분석", "수동 시뮬레이터", "규칙/온톨로지 탐색", "LLM 설정", "GitHub 배포 구조"])
 
@@ -1375,6 +1875,9 @@ with tab1:
         if result.get("verdict_reason"):
             st.info(f"📌 판정 핵심 근거: {result['verdict_reason']}")
 
+        graph_audits = result.get("graph_audits", [])
+        render_executive_summary(result, graph_audits)
+
         # [v4.3] Stage 0 Validity Red Card — 5차원 점수보다 우선하는 상위 자격 심사
         if result.get("validity_violation"):
             red = result.get("validity_red_card", {}) or {}
@@ -1406,19 +1909,11 @@ with tab1:
                     "이 표는 최종 axiom_distortion에 직접 반영되는 graph audit 기반 페널티 분해입니다. "
                     "LLM의 Feature/RAG 추출 근거는 아래 `2. 지표 분해` 섹션에서 별도로 확인합니다."
                 )
-                bd = result["dimension_breakdown"]
-                bd_df = pd.DataFrame([
-                    {
-                        "dimension": dim,
-                        "누적 페널티": bd.get(dim, 0),
-                        "정규화 (페널티/cap × 100)": round(min(100, abs(bd.get(dim, 0)) / PER_DIM_CAP * 100), 1),
-                        "가중치": result["weights"].get(dim, 0),
-                        "기여 distortion": round(min(100, abs(bd.get(dim, 0)) / PER_DIM_CAP * 100) * result["weights"].get(dim, 0), 2),
-                    }
-                    for dim in DIMENSIONS
-                ])
-                st.dataframe(bd_df, width="stretch", hide_index=True)
-                st.bar_chart(bd_df.set_index("dimension")["기여 distortion"])
+                render_dimension_contribution(
+                    result.get("dimension_breakdown", {}),
+                    result.get("weights", {}),
+                    heading="최종 axiom 차원별 기여도 — 기여도 순 정렬",
+                )
 
         st.subheader("2. 지표 분해")
         feature_df = pd.DataFrame(
@@ -1598,49 +2093,31 @@ with tab1:
                                     f"factor={factor} — {mitigation.get('reason')}"
                                 )
 
-                        st.markdown("**차원별 페널티 분해**")
-                        bd_df = pd.DataFrame([
-                            {
-                                "dimension": d,
-                                "누적 페널티": audit["dimension_breakdown"].get(d, 0),
-                                "정규화": round(min(100, abs(audit["dimension_breakdown"].get(d, 0)) / PER_DIM_CAP * 100), 1),
-                                "가중치": audit["dimension_weights"].get(d, 0),
-                                "기여 distortion": round(min(100, abs(audit["dimension_breakdown"].get(d, 0)) / PER_DIM_CAP * 100) * audit["dimension_weights"].get(d, 0), 2),
-                            }
-                            for d in DIMENSIONS
-                        ])
-                        st.dataframe(bd_df, width="stretch", hide_index=True)
+                        render_dimension_contribution(
+                            audit.get("dimension_breakdown", {}),
+                            audit.get("dimension_weights", {}),
+                            heading="차원별 페널티 기여도 — 기여도 순 정렬",
+                        )
 
-                        # [v4 보강] OWL Reasoning Trace Table — ontology-calibrated reasoning의 논리 사슬
+                        # [v4 보강] OWL Reasoning Trace Table — 요약 먼저, 원본은 접힘
                         trace = build_reasoning_trace(audit)
                         if trace:
-                            st.markdown("**🧬 OWL Reasoning Trace (ontology-calibrated reasoning 논리 사슬)**")
-                            st.caption(
-                                "audit_temporal_pair의 *각 추론 단계*를 구조화한 표. "
-                                "ValueAnchor → OWL relation → calibratesDimension → penalty → fired_rule의 *논리 사슬*이 추적됨."
-                            )
-                            trace_df = pd.DataFrame(trace)
-                            st.dataframe(trace_df, width="stretch", hide_index=True)
+                            render_reasoning_trace_compact(trace, expanded_detail=False)
 
-                        st.markdown("**audit reasons (그래프 추론 + 룰 발화 추적)**")
-                        for r in audit.get("reasons", []):
-                            st.markdown(f"- {r}")
+                        # ── audit reasons: 공통값 접기 + 서술형 불릿으로 압축 ──
+                        render_audit_reasons_compact(
+                            audit.get("reasons", []),
+                            heading="audit reasons — 그래프 추론 + 룰 발화 추적",
+                        )
 
+                        # ── actual axiom fired_rules: frame 단위 요약 우선, 원본은 접힘 ──
                         if audit.get("fired_rules"):
-                            st.markdown(f"**actual axiom fired_rules ({len(audit['fired_rules'])}개)**")
-                            fr_df = pd.DataFrame([
-                                {
-                                    "rule_id": r.get("rule_id"),
-                                    "schema_id": r.get("schema_id"),
-                                    "target_frame": r.get("target_frame"),
-                                    "dimension": r.get("dimension"),
-                                    "axiom_penalty": r.get("axiom_penalty"),
-                                    "intensity": r.get("intensity"),
-                                    "rule_strength": r.get("rule_strength"),
-                                }
-                                for r in audit["fired_rules"][:10]
-                            ])
-                            st.dataframe(fr_df, width="stretch", hide_index=True)
+                            render_fired_rules_grouped(
+                                audit.get("fired_rules", []),
+                                frame_groups=audit.get("frame_penalty_groups", []),
+                                heading="actual axiom fired_rules — 프레임 단위 요약",
+                                expanded_detail=False,
+                            )
 
         # ─────────────────────────────────────────────────────────
         # [4단계 보강] adjacent pair audit — 중간 변곡 구간 탐지
@@ -1679,9 +2156,14 @@ with tab1:
                     st.markdown("**다음 기사**")
                     st.caption(audit.get("present_article", {}).get("title", ""))
                     st.caption(audit.get("present_article", {}).get("date", ""))
-                st.markdown("**audit reasons**")
-                for reason in audit.get("reasons", []):
-                    st.markdown(f"- {reason}")
+                render_audit_reasons_compact(audit.get("reasons", []), heading="audit reasons")
+                if audit.get("fired_rules"):
+                    render_fired_rules_grouped(
+                        audit.get("fired_rules", []),
+                        frame_groups=audit.get("frame_penalty_groups", []),
+                        heading="인접 구간 actual fired_rules — 프레임 단위 요약",
+                        expanded_detail=False,
+                    )
 
         st.subheader("3.7. 룰 해설: Feature/RAG 추출 근거와 후보 규칙 분리")
         st.caption(
@@ -1705,9 +2187,27 @@ with tab1:
                     "frame_definition_ko", "schema_description_ko", "expected_evidence_ko", "score_hint"
                 ]
                 st.caption(
-                    "이 표는 검산·디버깅용 전체 목록입니다. 기본 화면에서는 graph audit 흐름 안에서 fired rule을 확인하도록 접어 두었습니다."
+                    "먼저 프레임 단위로 접은 뒤, 필요할 때만 원본 룰 행을 확인합니다. "
+                    "최종 graph audit 내부의 frame_penalty_groups가 있으면 3.5 표가 더 정확한 점수 반영 단위입니다."
                 )
-                st.dataframe(fired_df.drop(columns=hide_cols, errors="ignore"), width="stretch", hide_index=True)
+                render_fired_rules_grouped(
+                    result.get("axiom_fired_rules", []),
+                    frame_groups=result.get("axiom_frame_penalty_groups", []),
+                    heading="전체 actual axiom fired_rules — 프레임 단위 요약",
+                    expanded_detail=False,
+                )
+                disp_df = fired_df.drop(columns=hide_cols, errors="ignore").copy()
+                # 중복값이 1종류인 컬럼은 캡션 요약으로 올리고 표에서 제거
+                monotone_cols = []
+                for col in ["dimension", "schema_id", "target_frame", "context", "profile", "severity_band"]:
+                    if col in disp_df.columns and disp_df[col].nunique(dropna=False) == 1:
+                        val = disp_df[col].dropna().iloc[0] if not disp_df[col].dropna().empty else "-"
+                        st.caption(f"📌 {col}: `{val}`")
+                        monotone_cols.append(col)
+                if monotone_cols:
+                    disp_df = disp_df.drop(columns=monotone_cols)
+                with st.expander("원본 fired_rules 행 전체 보기", expanded=False):
+                    st.dataframe(disp_df, width="stretch", hide_index=True)
         else:
             st.info(
                 "최종 graph audit에서 actual fired_rules가 없거나 graph audit이 불가능했습니다. "
@@ -1715,7 +2215,7 @@ with tab1:
             )
 
         if not candidate_df.empty:
-            with st.expander("📋 A/B 분리 해설 — Feature/RAG LLM 근거와 candidate_rules", expanded=True):
+            with st.expander("📋 A/B 분리 해설 — Feature/RAG LLM 근거와 candidate_rules", expanded=False):
                 render_candidate_rule_explanations(
                     result.get("candidate_rules", result.get("matched_rules", [])),
                     sllm_meta=sllm_meta,
