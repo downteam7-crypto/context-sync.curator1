@@ -5,7 +5,7 @@
 **Live Demo**: <https://context-sync-curator1.streamlit.app/>  
 **GitHub Repository**: <https://github.com/downteam7-crypto/context-sync.curator1>
 
-**현재 버전: v2.2** (4단계 Streamlit — 기사 묶음 일괄 분석 + Cloud Dense-OpenAI RAG) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/로드맵_3단계`](./legacy/로드맵_3단계/)에 보존
+**현재 버전: v2.2.1** (4단계 Streamlit — 기사 묶음 일괄 분석 + Cloud Dense-OpenAI RAG + Readability Patch) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/로드맵_3단계`](./legacy/로드맵_3단계/)에 보존
 
 뉴스 기사 묶음의 시계열 논조 변화가 *맥락 정합성* 안에서 일관되는지, 아니면 *기준 이탈*인지를 다층적으로 평가하는 프로토타입.
 
@@ -419,12 +419,14 @@ Dense RAG를 켜면 한국어 임베딩 모델이 자동 다운로드될 수 있
 
 ### 출력 패널
 
-- **요약 메트릭**: 최종 왜곡도, 정합성 점수, v1 보조 왜곡도, 트리거 규칙 수
-- **차원별 페널티 분해**: 5차원 dimension_breakdown 표 + 막대그래프
+- **Executive Summary**: 정합성 점수와 최종 왜곡도뿐 아니라, 대표 변곡 구간, 주요 감점 차원, 주요 발화 프레임, 설명 완화 여부를 상단에서 먼저 요약
+- **차원별 기여도 분해**: 5차원 dimension_breakdown을 기여 distortion 큰 순서로 정렬해 표시. 고왜곡 케이스에서 최종 점수는 100으로 클리핑될 수 있으므로, 표의 기여도 합은 *원인 비중 파악용*으로 해석
 - **시계열 그래프**: sentiment + 변곡점 마커
-- **OWL Reasoning Trace**: 추론 논리 사슬 표
+- **OWL Reasoning Trace**: 긴 trace 원본 표를 바로 펼치기보다, 시계열 변화 / OWL 가치구조 / 룰·페널티 반영 단계로 요약한 뒤 상세 표는 접힘 처리
+- **Axiom Graph Audit Reasons**: 동일한 설명 완화 로그는 factor와 전후 penalty 값이 같은 룰끼리 묶어 표시. rule_id만 다른 반복 로그는 상세 목록으로 접음
+- **actual fired_rules 요약**: rule_id 단위 반복표 대신 `target_frame × dimension` 기준으로 묶고, raw penalty / capped penalty / suppressed penalty를 분리 표시. signed penalty와 양수 왜곡 반영량을 함께 보여 혼선을 줄임
 - **RAG Evidence Panel**: Sparse + Dense 병렬 비교. Dense 엔진은 Cloud=OpenAI(`text-embedding-3-small`, 키 필요) / 로컬 고급 모드=ko-sroberta. 키 없으면 Sparse 단독
-- **트리거된 규칙**: axiom fired_rules + 메타 7필드 (frame_definition, schema_description, expected_evidence, score_hint 등)
+- **candidate_rules 보조 표**: Feature/RAG 기반 후보 규칙은 최종 점수의 직접 근거인 actual fired_rules와 분리하고, 기본 접힘 상태에서 `schema_id × target_frame × dimension` 묶음 요약으로 표시
 - **OWL 계층 시각화**: Mermaid 다이어그램
 - **수동 시뮬레이터**: 차원/가중치 슬라이더
 
@@ -472,7 +474,22 @@ context-sync.curator1/
 
 > **버전 체계 안내**: 4단계 Streamlit 분석 도구는 *3.5단계까지의 Gradio Hybrid(legacy v1.x)와 별개의 메이저 라인*으로, **v2.0부터 새로 시작**한다. 즉 *4단계 진입 = v2.0*. legacy의 v1.0~v1.2.2는 `legacy/로드맵_3단계/`에 보존된다. (룰셋/OWL 데이터셋 내부 버전인 `v2.1.6-...`은 *데이터셋 자체의 일련 번호*이며 앱 버전과 별개 네임스페이스다.)
 
-### v2.2 (현재) — Cloud Dense-OpenAI RAG + cutoff calibration
+### v2.2.1 (현재) — Readability Patch: Executive Summary + compact audit UI
+
+v2.2.1은 v2.2의 Cloud Dense-OpenAI RAG 구조와 v2.1의 점수·판정 구조를 유지한 상태에서, **분석 결과를 사람이 더 빨리 읽을 수 있도록 정리한 UI/가독성 패치**다.
+
+> **변경 범위 (3층 분리 관점)**: OWL 어휘, 1024개 JSON 룰셋, 5차원 점수 계산식, `per_dim_cap=45`, frame-level soft cap 로직은 변경하지 않는다. 변경은 `app.py`의 렌더링 계층에 집중되어 있으며, 같은 계산 결과를 더 적은 중복과 더 명확한 위계로 보여주는 데 목적이 있다.
+
+- **Executive Summary 추가**: 대표 변곡 구간, 주요 감점 차원, 주요 발화 프레임, 설명 완화 여부를 상단에서 요약한다.
+- **대표 audit 선택 안정화**: `primary_graph_audit`을 우선 사용하고, 없을 때만 `graph_audits[0]`로 fallback한다.
+- **차원별 기여도 정렬**: dimension breakdown을 기여 distortion 큰 순서로 표시하고, 고왜곡 케이스에서 최종 왜곡도 100 클리핑과 기여도 합이 다를 수 있음을 안내한다.
+- **OWL Reasoning Trace 요약화**: 긴 trace 표를 바로 노출하지 않고, 시계열 변화 / OWL 가치구조 / 룰·페널티 반영 단계로 먼저 요약한다. 원본 stage 라벨은 렌더링 계층에서 한국어로 표시한다.
+- **Audit reasons compact rendering**: `factor=0.9`, `-12.3 → -11.1`처럼 같은 형식의 설명 완화 로그를 하나로 묶고, rule_id 목록은 상세 접힘으로 이동한다.
+- **actual fired_rules 프레임 단위 집계**: rule_id만 다른 반복 행을 `target_frame × dimension` 단위로 묶고, `raw_rule_sum`, `capped_penalty`, `suppressed_penalty`를 분리 표시한다.
+- **signed penalty / positive contribution 분리**: 엔진 내부의 음수 penalty와 사용자 해석용 양수 왜곡 반영량을 함께 표시해 UI 혼선을 줄인다.
+- **candidate_rules 기본 접힘 처리**: 최종 점수 직접 근거인 actual fired_rules와 Feature/RAG 기반 후보 규칙을 분리하고, 후보 규칙은 `schema_id × target_frame × dimension` 요약을 먼저 보여준다.
+
+### v2.2 — Cloud Dense-OpenAI RAG + cutoff calibration
 
 v2.2는 v2.1의 판정 구조를 유지한 상태에서, **Cloud 배포 환경의 RAG 근거 탐색을 보강한 버전**이다. v2.1이 *점수·판정 구조 정교화*라면, v2.2는 *Cloud/Local Dense 엔진 분리와 OpenAI 임베딩 기반 RAG 확장*에 초점을 둔다.
 
@@ -571,11 +588,12 @@ OWL + JSON + Python 3축 구조의 초기 구현. 과거/현재 두 텍스트의
   - `sync_frames_with_rules` 런타임 동기화
   - JSON + OWL + Python 3층 동시 갱신 + ValueAnchor↔dimension 매핑 정합성 정리
 
-- [x] **4단계 — 기사 묶음 일괄 분석 (Streamlit, v2.0 ~ v2.2)**
+- [x] **4단계 — 기사 묶음 일괄 분석 (Streamlit, v2.0 ~ v2.2.1)**
   - 5차원 지표 + 1024 룰 + Plotly 시계열 sentiment 그래프 + 변곡점 마커 + RuleSchema 히트맵
   - RAG Evidence Panel (Sparse + Dense 병렬 비교). Dense 엔진은 환경별 이원화 — Cloud는 OpenAI 임베딩(`text-embedding-3-small`, 키 필요), 로컬 고급 모드는 ko-sroberta. cutoff 슬라이더 + `tools/calibrate_min_dense_score.py` 보정 도구
   - 수동 시뮬레이터 (5features + 5weights + 5프리셋)
   - OWL 계층 시각화 (Mermaid) + Reasoning Trace Table
+  - Executive Summary + compact audit UI: 대표 변곡 구간, frame-level fired_rules 요약, trace 접힘 처리, candidate_rules 분리 표시
   - baseline 복귀 (0.34/cap 45) + explanation mitigation 통합
   - 5단계 verdict 농도 모델 (안정적 정합 → 기준 이탈)
   - 제목·부제 가중치 (title 1.5 / subtitle 1.25 / body 1.0) + URL 자동 추출
