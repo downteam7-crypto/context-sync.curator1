@@ -1,4 +1,4 @@
-# Context-Sync Curator — Streamlit Community Cloud profile (2nd deployment)
+# Context-Sync Curator - Streamlit Community Cloud profile (2nd deployment)
 # Python 3.10+
 
 streamlit>=1.30

@@ -11,7 +11,8 @@ from urllib.request import Request, urlopen
 import pandas as pd
 import streamlit as st
 
-from rule_engine import (
+from engine import rule_engine as _rule_engine
+from engine.rule_engine import (
     DIMENSIONS, analyze_pipeline, build_owl_mermaid, extract_formula_weights,
     load_ontology, load_rules, summarize_rules,
     # [v1.2.2 axiom 흡수]
@@ -28,10 +29,13 @@ from rule_engine import (
 # 기본 requirements.txt에 포함하지 않는다. sllm_extractor가 없거나 heavy dependency 때문에 import 실패하면
 # 앱은 휴리스틱/룰 기반 모드로 계속 실행되고, 로컬 배포판에서만 선택 기능을 활성화한다.
 try:
-    from sllm_extractor import (
+    from engine.sllm_extractor import (
         DEFAULT_MODEL,
         extract_features_with_sllm,
         compare_rag_results,
+        make_openai_stance_llm_call,
+        make_local_stance_llm_call,
+        with_cache,
         _rule_text,
     )
     SLLM_EXTRACTOR_AVAILABLE = True
@@ -50,10 +54,16 @@ except Exception as _sllm_import_error:  # pragma: no cover - deployment guard
 
     def extract_features_with_sllm(*args, **kwargs):
         raise RuntimeError(
-            "sllm_extractor 모듈 또는 선택 의존성이 로드되지 않았습니다. "
+            "engine.sllm_extractor 모듈 또는 선택 의존성이 로드되지 않았습니다. "
             "Streamlit Cloud 배포판에서는 기본 휴리스틱/룰 기반 모드를 사용하세요. "
             "로컬에서 LLM/sLLM 모드를 쓰려면 requirements-sllm.txt를 설치하세요."
         )
+
+    make_openai_stance_llm_call = None
+    make_local_stance_llm_call = None
+
+    def with_cache(llm_call, maxsize: int = 512):
+        return llm_call
 
     def compare_rag_results(articles, rules_data, top_k=8, dense_model=None, rule_embeddings=None, min_sparse_score=0.001, min_dense_score=0.15, openai_api_key="", openai_rule_embeddings=None, openai_embed_model="text-embedding-3-small"):
         # Sparse-only fallback. 이 분기는 sllm_extractor import 자체가 실패한 극단 케이스에만 쓰인다
@@ -123,11 +133,11 @@ def compute_openai_rule_embeddings(rules_list, api_key: str, embed_model: str = 
     """클라우드 Dense RAG용 OpenAI 룰 임베딩 캐시.
 
     동일 rules_list/키/모델이면 캐시 재사용(1024개 룰 재임베딩 비용·지연 방지).
-    헬퍼는 sllm_extractor.openai_embed_texts를 사용하므로 별도 의존성 없음.
+    헬퍼는 engine.sllm_extractor.openai_embed_texts를 사용하므로 별도 의존성 없음.
     실패 시 None → compare_rag_results가 즉석 계산 또는 Sparse-only로 fallback.
     """
     try:
-        from sllm_extractor import openai_embed_texts
+        from engine.sllm_extractor import openai_embed_texts
         return openai_embed_texts([_rule_text(r) for r in rules_list], api_key=api_key, model=embed_model)
     except Exception:
         return None
@@ -202,6 +212,90 @@ with st.sidebar:
         value=default_key,
         help="GPT 모델 이용 시 필요합니다. Streamlit Cloud Secrets 또는 사이드바 입력을 사용할 수 있습니다.",
     )
+
+    st.divider()
+    st.subheader("논조 추출 방식 (후보 기능 · 공식 v2.3 미반영)")
+    stance_options = ["기본 휴리스틱"]
+    if make_openai_stance_llm_call is not None:
+        stance_options.append("OpenAI API")
+    if (not cloud_mode) and make_local_stance_llm_call is not None:
+        stance_options.append("Local sLLM")
+
+    stance_mode = st.selectbox(
+        "논조 추출 방식",
+        stance_options,
+        index=0,
+        help=(
+            "기사의 stance_polarity와 evaluation_target을 어떤 방식으로 추출할지 선택합니다. "
+            "점수 공식은 바뀌지 않고, Stage 1 논조 추출층만 바뀝니다. "
+            "휴리스틱은 외부 모델 없이 규칙/키워드로 작동하고, OpenAI/Local sLLM은 평가 대상 기준 signed stance를 LLM으로 추출합니다. "
+            "이 기능은 후보 패치이며 공식 README 버전은 v2.3으로 유지합니다."
+        ),
+    )
+
+    # 기본값은 항상 기존 휴리스틱 점수와의 백워드 호환을 우선한다.
+    _rule_engine.DEFAULT_STANCE_LLM = None
+    if hasattr(_rule_engine, "FALLBACK_USE_MARKET_SUPPLEMENT"):
+        _rule_engine.FALLBACK_USE_MARKET_SUPPLEMENT = False
+    if hasattr(_rule_engine, "FALLBACK_USE_STANCE_SUPPLEMENT"):
+        _rule_engine.FALLBACK_USE_STANCE_SUPPLEMENT = False
+
+    use_enhanced_heuristic = False
+    if stance_mode == "기본 휴리스틱":
+        use_enhanced_heuristic = st.checkbox(
+            "휴리스틱 키워드 보강 사용",
+            value=False,
+            help=(
+                "외부 LLM 없이 도메인별 phrase cue(수혜/환차익/무혐의/타결/에너지 안보 등)를 "
+                "stance_polarity 보조 계산에 반영합니다. 공식 v2.3 baseline과 점수가 달라질 수 있으므로 비교/실험용으로 사용하세요."
+            ),
+        )
+        if use_enhanced_heuristic:
+            if hasattr(_rule_engine, "FALLBACK_USE_MARKET_SUPPLEMENT"):
+                _rule_engine.FALLBACK_USE_MARKET_SUPPLEMENT = True
+            if hasattr(_rule_engine, "FALLBACK_USE_STANCE_SUPPLEMENT"):
+                _rule_engine.FALLBACK_USE_STANCE_SUPPLEMENT = True
+            st.info(
+                "휴리스틱 키워드 보강 활성화: 외부 LLM 없이 도메인별 phrase cue를 추가 반영합니다. "
+                "점수는 기본 휴리스틱과 달라질 수 있습니다."
+            )
+        else:
+            st.caption(
+                "기본 휴리스틱: 외부 LLM 없이 기존 lexicon/cue 기반으로 stance_polarity를 계산합니다. "
+                "키워드 보강을 켜면 일부 도메인 표현을 더 민감하게 잡지만, 공식 v2.3 baseline과 점수가 달라질 수 있습니다."
+            )
+    elif stance_mode == "OpenAI API":
+        stance_openai_model = st.text_input("논조 추출 OpenAI 모델", value="gpt-4o-mini")
+        if openai_api_key and make_openai_stance_llm_call is not None:
+            _rule_engine.DEFAULT_STANCE_LLM = with_cache(
+                make_openai_stance_llm_call(
+                    model=stance_openai_model,
+                    api_key=openai_api_key,
+                )
+            )
+            st.success(f"논조 추출 LLM 활성화: OpenAI `{stance_openai_model}`")
+        else:
+            st.warning("OpenAI 논조 추출을 쓰려면 OpenAI API Key가 필요합니다. 키가 없으면 기본 휴리스틱으로 동작합니다.")
+    elif stance_mode == "Local sLLM":
+        stance_local_model = st.text_input(
+            "논조 추출 Local 모델",
+            value=sllm_model or DEFAULT_MODEL,
+            help="예: Qwen/Qwen2.5-0.5B-Instruct. 로컬에서 requirements-sllm.txt 설치 후 STREAMLIT_CLOUD=0으로 실행하세요.",
+        )
+        stance_local_tokens = st.slider("논조 추출 Local max_new_tokens", 128, 1024, 512, step=64)
+        stance_local_temp = st.slider("논조 추출 Local temperature", 0.0, 1.0, 0.0, step=0.05)
+        if make_local_stance_llm_call is not None:
+            _rule_engine.DEFAULT_STANCE_LLM = with_cache(
+                make_local_stance_llm_call(
+                    model=stance_local_model,
+                    max_new_tokens=stance_local_tokens,
+                    temperature=stance_local_temp,
+                )
+            )
+            st.success(f"논조 추출 LLM 활성화: Local `{stance_local_model}`")
+        else:
+            st.warning("로컬 논조 추출 sLLM 어댑터를 불러오지 못했습니다. 기본 휴리스틱으로 동작합니다.")
+
     use_owl_audit_llm_summary = st.toggle(
         "OWL graph audit LLM 요약 생성",
         value=False,
@@ -1140,6 +1234,15 @@ def render_executive_summary(result: dict, graph_audits: list[dict] | None = Non
             f"{past_date or '?'} → {present_date or '?'}{delta_txt}. "
             "대표 audit은 엔진의 `primary_graph_audit`을 우선 사용합니다."
         )
+        src_p = past_signal.get("extraction_source", "heuristic")
+        src_c = present_signal.get("extraction_source", "heuristic")
+        if (src_p != "heuristic" or src_c != "heuristic" or past_signal.get("evaluation_target") or present_signal.get("evaluation_target")):
+            st.caption(
+                "stance 추출: "
+                f"PAST `{src_p}` / PRESENT `{src_c}` · "
+                f"target `{past_signal.get('evaluation_target', '-') or '-'}` → `{present_signal.get('evaluation_target', '-') or '-'}` · "
+                f"label `{past_signal.get('stance_label', '-') or '-'}` → `{present_signal.get('stance_label', '-') or '-'}`"
+            )
         shift_cols = st.columns(2)
         with shift_cols[0]:
             st.markdown("**이전 신호**")
@@ -2049,6 +2152,12 @@ with tab1:
                             st.write(f"• promoted_value: `{past_d.get('promoted_value')}`")
                             st.write(f"• detected_frame: `{past_d.get('detected_frame')}`")
                             st.write(f"• stance_polarity: `{past_d.get('stance_polarity')}`")
+                            if past_d.get("extraction_source"):
+                                st.write(f"• extraction_source: `{past_d.get('extraction_source')}`")
+                            if past_d.get("evaluation_target"):
+                                st.write(f"• evaluation_target: `{past_d.get('evaluation_target')}` / scope=`{past_d.get('target_scope', '-')}`")
+                            if past_d.get("stance_label"):
+                                st.write(f"• stance_label: `{past_d.get('stance_label')}` / confidence=`{past_d.get('polarity_confidence', '-')}`")
                         with c_present:
                             st.markdown("**📰 PRESENT (시간순 마지막 기사)**")
                             st.caption(audit["present_article"].get("title", ""))
@@ -2057,6 +2166,12 @@ with tab1:
                             st.write(f"• promoted_value: `{pres_d.get('promoted_value')}`")
                             st.write(f"• detected_frame: `{pres_d.get('detected_frame')}`")
                             st.write(f"• stance_polarity: `{pres_d.get('stance_polarity')}`")
+                            if pres_d.get("extraction_source"):
+                                st.write(f"• extraction_source: `{pres_d.get('extraction_source')}`")
+                            if pres_d.get("evaluation_target"):
+                                st.write(f"• evaluation_target: `{pres_d.get('evaluation_target')}` / scope=`{pres_d.get('target_scope', '-')}`")
+                            if pres_d.get("stance_label"):
+                                st.write(f"• stance_label: `{pres_d.get('stance_label')}` / confidence=`{pres_d.get('polarity_confidence', '-')}`")
 
                         if idx == 0 and use_owl_audit_llm_summary:
                             with st.expander("🤖 OWL graph audit 전용 LLM 요약해설", expanded=True):
@@ -2137,6 +2252,8 @@ with tab1:
                     "PAST 날짜": audit.get("past_article", {}).get("date", ""),
                     "PRESENT 날짜": audit.get("present_article", {}).get("date", ""),
                     "polarity Δ": round(abs(float(past_d.get("stance_polarity", 0) or 0) - float(pres_d.get("stance_polarity", 0) or 0)), 3),
+                    "stance_source": f"{past_d.get('extraction_source', 'heuristic')}→{pres_d.get('extraction_source', 'heuristic')}",
+                    "target_shift": f"{past_d.get('evaluation_target', '-') or '-'}→{pres_d.get('evaluation_target', '-') or '-'}",
                     "weighted_distortion": audit.get("weighted_distortion", 0),
                     "coherence_score": audit.get("score", 0),
                     "verdict": audit.get("anchor_verdict", "-"),
@@ -2564,36 +2681,31 @@ with tab5:
     st.markdown("#### 저장소 구조")
     st.code(
         """context-sync.curator1/
-├─ app.py                         # Streamlit 메인 앱
-├─ rule_engine.py                 # OWL/JSON 기반 axiom audit 계산 엔진
-├─ sllm_extractor.py              # OpenAI GPT 추출기 + 로컬 sLLM/Dense RAG 옵션
+├─ app.py                         # Streamlit UI / Cloud 진입점
+├─ engine/                        # 앱 구동 중 import되는 런타임 코드
+│  ├─ __init__.py
+│  ├─ rule_engine.py              # axiom audit 엔진 + graph audit + stance 후보 추출층
+│  └─ sllm_extractor.py           # OpenAI/Local sLLM 추출기 + Dense/Sparse RAG
+├─ ontology/
+│  ├─ context_sync_app_centered_ontology_1024.owl
+│  ├─ news_rules_1024.json
+│  └─ alignment_annotations.owl   # 선택: OWL–JSON 이중축 설명용 어노테이션
+├─ tools/                         # 일회성 진단·검증·보정 스크립트
+│  ├─ calibrate_min_dense_score.py
+│  ├─ validate_owl_json_alignment.py
+│  └─ test_stance.py              # 선택: 후보 논조 추출층 smoke test
+├─ docs/
+├─ comparison/
+├─ sample_data/
+├─ legacy/로드맵_3단계/
 ├─ requirements.txt               # Streamlit Cloud 경량 의존성
 ├─ requirements-sllm.txt          # 로컬 sLLM / Dense RAG 고급 의존성
-├─ tools/
-│  └─ calibrate_min_dense_score.py # OpenAI Dense cutoff 진단·보정 도구(측정용)
 ├─ README.md
 ├─ LICENSE
 ├─ .env.example
 ├─ .gitignore
-├─ .streamlit/
-│  └─ config.toml
-├─ ontology/
-│  ├─ context_sync_app_centered_ontology_1024.owl
-│  └─ news_rules_1024.json
-├─ sample_data/
-│  ├─ sample_articles.json
-│  └─ sample_scenarios.json
-├─ docs/
-│  ├─ 01_problem_framing.md
-│  ├─ 02_cognition_and_metacognition.md
-│  ├─ 03_hybrid_ontology.md
-│  └─ 04_background.md
-├─ legacy/
-│  └─ 로드맵_3단계/
-│     └─ v1.0-3.5stage/
-└─ comparison/
-   ├─ README.md
-   └─ axiom_tracker_pure_llm.py
+└─ .streamlit/
+   └─ config.toml
 """,
         language="text",
     )

@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import rdflib
 
@@ -851,25 +851,279 @@ def compute_frame_capped_dimension_breakdown(
 # audit_temporal_pair: axiom audit_logic의 N-묶음 적응판
 # ─────────────────────────────────────
 
+# ══════════════════════════════════════════════════════════════════════
+# [candidate] target-aware signed stance 추출층 (rule_engine 내부 흡수)
+#   - heuristic_extract_symbol의 출력 스키마(상위집합)를 유지하며 부호 있는
+#     target-aware stance를 추출한다.
+#   - DEFAULT_STANCE_LLM을 앱 시작 시 1회 설정하면(예: rule_engine.DEFAULT_STANCE_LLM=my_llm)
+#     모든 audit 경로가 LLM stance를 사용한다. 미설정이면 휴리스틱으로 동일 작동한다.
+#   - 점수 공식(temporal penalty / per_dim_cap / weights / frame soft cap)은 불변이다.
+#   - my_llm 시그니처: Callable[[str], str]  (프롬프트 -> JSON 문자열)
+# ══════════════════════════════════════════════════════════════════════
+DEFAULT_STANCE_LLM: Optional[Callable[[str], str]] = None
+
+STANCE_TARGET_SCOPES = [
+    "macro", "sector", "company", "individual", "institution", "policy",
+    "group", "technology", "other",
+]
+
+# domain은 점수 공식에 직접 들어가지 않는다. LLM stance 추출의 분류 해상도를 높이기 위한 메뉴이자 검증 필터다.
+STANCE_DOMAINS = [
+    "economy",       # 거시경제: 물가, 성장률, 수출입, 고용, 경기
+    "finance",       # 금융/시장: 주식, 채권, 환율, 자산시장, 기업 실적
+    "law",           # 수사, 재판, 판결, 규제, 법적 책임
+    "politics",      # 정당, 선거, 의회, 행정부 정치 쟁점
+    "diplomacy",     # 외교, 통상, 국제협상, 대외관계
+    "security",      # 군사, 안보, 치안, 사이버 안보
+    "labor",         # 고용, 노사관계, 임금, 노동권
+    "health",        # 보건, 의료, 의약품, 감염병
+    "education",     # 입시, 학교, 교권, 학습권, 사교육
+    "energy",        # 에너지 수급, 전기요금, 원전, 재생에너지
+    "environment",   # 기후, 탄소, 오염, 생태, 환경 규제
+    "housing",       # 부동산, 전세, 임대차, 주거 안정
+    "welfare",       # 복지, 연금, 돌봄, 취약계층
+    "culture",       # 콘텐츠, 예술, 스포츠, 문화산업
+    "media",         # 언론, 플랫폼, 여론, 검열, 가짜뉴스
+    "technology",    # AI, 반도체, 플랫폼 기술, 산업 기술
+    "science",       # 과학 연구, R&D, 연구 윤리, 기초과학
+    "transport",     # 교통, 철도, 항공, 물류, 교통안전
+    "agriculture",   # 농업, 식량, 축산, 수산
+    "society",       # 일반 사회 이슈
+    "other",
+]
+
+STANCE_LABELS = [
+    "risk_negative", "accountability_negative", "benefit_positive",
+    "vindication_positive", "neutral", "mixed",
+]
+STANCE_OWL_VALUE_ANCHORS = [
+    "StanceConsistency", "FrameAccountability", "ContextCompleteness",
+    "ResponsibilitySeparation", "EvidenceTransparency", "PluralPublicReason",
+]
+
+# 오프라인 폴백 보조 사전 — 기본 OFF. 켜면 LLM 없이도 일부 도메인 관용 표현을 stance_polarity에 반영한다.
+# 기본값 False는 기존 휴리스틱 점수와의 백워드 호환을 지키기 위한 설정이다.
+FALLBACK_USE_MARKET_SUPPLEMENT = False          # 기존 이름 유지: app/문서 호환용
+FALLBACK_USE_STANCE_SUPPLEMENT = False          # 의미상 더 넓은 새 이름
+
+STANCE_POSITIVE_SUPPLEMENT = [
+    # finance/economy
+    "수혜", "환차익", "역주행", "강세", "반등", "호재", "선방",
+    "실적 개선", "마진 개선", "수출 호조", "이익 증가", "오히려 좋아",
+    "원화 약세 수혜", "고환율 수혜", "환율 효과", "수출주 수혜",
+    # law / accountability-vindication
+    "정당성 인정", "무혐의", "무죄", "혐의 없음", "의혹 해소", "근거 없음", "해명", "반박",
+    # labor / welfare / society
+    "타결", "합의 도출", "고용 안정", "상생", "협상 진전", "사각지대 해소", "보장 확대",
+    # health / science / technology
+    "효과 입증", "안전성 확인", "도입 기대", "생산성 향상", "신규 직무", "기술 경쟁력",
+    # security / diplomacy
+    "긴장 완화", "평화 정착", "협력 강화", "외교 성과", "합의 이행",
+    # education / culture / media / energy / environment / housing
+    "학습권 보장", "교육 격차 해소", "에너지 안보 강화", "전력 안정", "탄소 감축",
+    "수출 성과", "흥행", "표현의 자유", "주거 안정", "공급 확대",
+]
+
+STANCE_NEGATIVE_SUPPLEMENT = [
+    # finance/economy
+    "환율 부담", "원가 부담", "마진 악화", "수입물가 상승", "외국인 이탈", "자본 유출",
+    "금융 불안", "원화 약세 부담", "고환율 부담", "환율 리스크", "손실 우려",
+    # law / politics / accountability
+    "유죄 가능성", "책임 추궁", "책임 회피", "특혜 의혹", "위법 논란", "절차 위반",
+    # labor / welfare
+    "고용 불안", "정리해고", "임금 체불", "복지 축소", "재정 부담", "돌봄 공백",
+    # health / science / technology
+    "부작용 위험", "안전성 의혹", "연구 부정", "기술 종속", "일자리 위협", "정보 유출",
+    # security / diplomacy
+    "군사 위협", "긴장 고조", "제재 우려", "외교 갈등", "안보 공백",
+    # education / culture / media / energy / environment / housing
+    "입시 혼란", "학습권 침해", "교권 침해", "전기요금 부담", "공급 불안",
+    "환경 훼손", "오염 우려", "선정성 논란", "검열 논란", "전세 불안", "주거 불안",
+]
+
+# 하위 호환 별칭: 예전 코드/문서의 MARKET_POSITIVE_SUPPLEMENT 참조를 깨지 않음.
+MARKET_POSITIVE_SUPPLEMENT = STANCE_POSITIVE_SUPPLEMENT
+MARKET_NEGATIVE_SUPPLEMENT = STANCE_NEGATIVE_SUPPLEMENT
+
+
+def build_stance_prompt(text: str) -> str:
+    return f"""너는 뉴스 기사 한 건의 '입장(stance)'을 구조적으로 추출하는 분석기다.
+어떤 분야(경제·금융·법·정치·외교·안보·노동·보건·교육·에너지·환경·주거·복지·문화·미디어·기술·과학·교통·농업·사회 등)든 동일한 틀로 처리한다.
+
+가장 중요한 원칙:
+- stance_polarity는 *표면 주제*가 아니라 *평가 대상(evaluation_target) 기준*의
+  부호 있는 값(-1.0 ~ +1.0)이다. 같은 사건도 평가 대상이 다르면 부호가 달라진다.
+  예) "고환율"이라도 평가 대상이 '거시경제'면 risk(−), '수출 기업/수출주'면 benefit(+).
+- 위협/위험/손실/위기/책임추궁 → 음수. 기회/이익/수혜/성과/정당성/무혐의/해명 → 양수. 중립 → 0.
+- 반어("오히려 좋아")·맥락·섹터 수혜를 사전 없이 의미로 읽어라.
+- domain이 여러 개 걸치면 *평가 대상의 1차 분야* 하나만 고른다.
+  · 거시 집계(물가·성장률·수출입·고용·경기)=economy / 시장·자산·기업실적·주가=finance
+  · 에너지 수급·전기요금·원전·재생에너지 공급=energy / 기후·오염·생태·환경 규제=environment
+  · 콘텐츠·예술·스포츠·문화산업=culture / 언론·플랫폼·여론·검열·가짜뉴스=media
+  · 외교·통상·국제협상=diplomacy / 군사·안보 위협·치안·사이버 안보=security
+  · 과학 연구·R&D·연구 윤리=science / 산업 적용 기술·AI·플랫폼·반도체=technology
+
+target_scope: {STANCE_TARGET_SCOPES}
+domain: {STANCE_DOMAINS}
+stance_label: {STANCE_LABELS}
+promoted_value(OWL ValueAnchor): {STANCE_OWL_VALUE_ANCHORS}
+detected_frame: OWL Frame 이름 또는 "None"
+
+아래 JSON만 출력한다. 마크다운·설명·코드펜스 금지.
+{{
+  "surface_topic": "<표면 주제>",
+  "evaluation_target": "<실제 평가 대상>",
+  "target_scope": "<{'|'.join(STANCE_TARGET_SCOPES)}>",
+  "domain": "<{'|'.join(STANCE_DOMAINS)}>",
+  "stance_polarity": <-1.0~+1.0, 평가 대상 기준 부호>,
+  "stance_label": "<{'|'.join(STANCE_LABELS)}>",
+  "risk_frame": <true|false>,
+  "benefit_frame": <true|false>,
+  "promoted_value": "<ValueAnchor>",
+  "detected_frame": "<Frame 또는 None>",
+  "topic": "<짧은 주제 키>",
+  "polarity_confidence": <0.0~1.0>,
+  "evidence_basis": "<부호 판단의 짧은 근거>"
+}}
+
+기사:
+<<<ARTICLE>>>
+{text}
+<<<END_ARTICLE>>>"""
+
+
+def _coerce_stance(d: Dict[str, Any]) -> Dict[str, Any]:
+    """LLM JSON을 스키마에 맞게 정규화 + 백워드 호환 키 보장."""
+    out: Dict[str, Any] = {}
+    out["promoted_value"] = str(d.get("promoted_value") or "StanceConsistency")
+    out["detected_frame"] = str(d.get("detected_frame") or "None")
+    try:
+        pol = float(d.get("stance_polarity", 0.0))
+    except (TypeError, ValueError):
+        pol = 0.0
+    out["stance_polarity"] = round(max(-1.0, min(1.0, pol)), 3)
+    out["topic"] = str(d.get("topic") or "")
+    out["surface_topic"] = str(d.get("surface_topic") or "")
+    out["evaluation_target"] = str(d.get("evaluation_target") or "")
+    out["target_scope"] = d.get("target_scope") if d.get("target_scope") in STANCE_TARGET_SCOPES else "other"
+    out["domain"] = d.get("domain") if d.get("domain") in STANCE_DOMAINS else "other"
+    out["stance_label"] = d.get("stance_label") if d.get("stance_label") in STANCE_LABELS else "neutral"
+    out["risk_frame"] = bool(d.get("risk_frame", out["stance_polarity"] < -0.15))
+    out["benefit_frame"] = bool(d.get("benefit_frame", out["stance_polarity"] > 0.15))
+    try:
+        conf = float(d.get("polarity_confidence", 0.5))
+    except (TypeError, ValueError):
+        conf = 0.5
+    out["polarity_confidence"] = round(max(0.0, min(1.0, conf)), 3)
+    out["evidence_basis"] = str(d.get("evidence_basis") or "")
+    out["extraction_source"] = "llm"
+    return out
+
+
+def parse_stance_response(raw: str) -> Optional[Dict[str, Any]]:
+    """LLM 응답에서 stance JSON 추출. 실패 시 None."""
+    if not raw:
+        return None
+    s = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        return _coerce_stance(json.loads(s))
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", s, flags=re.DOTALL)
+        if m:
+            try:
+                return _coerce_stance(json.loads(m.group(0)))
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
+def _heuristic_stance_fallback(text: str, graph=None) -> Dict[str, Any]:
+    """heuristic_extract_symbol + 선택형 보조 사전. 기본은 점수 불변."""
+    base = heuristic_extract_symbol(text, graph)
+    if FALLBACK_USE_MARKET_SUPPLEMENT or FALLBACK_USE_STANCE_SUPPLEMENT:
+        pos = count_hits(text, POSITIVE_LEXICON) + count_hits(text, STANCE_POSITIVE_SUPPLEMENT)
+        neg = count_hits(text, NEGATIVE_LEXICON) + count_hits(text, STANCE_NEGATIVE_SUPPLEMENT)
+        if pos + neg > 0:
+            base["stance_polarity"] = round(max(-1.0, min(1.0, (pos - neg) / (pos + neg))), 3)
+    base.update({
+        "surface_topic": "", "evaluation_target": "", "target_scope": "other",
+        "domain": "other", "stance_label": "neutral",
+        "risk_frame": base["stance_polarity"] < -0.15,
+        "benefit_frame": base["stance_polarity"] > 0.15,
+        "polarity_confidence": 0.3, "evidence_basis": "heuristic fallback",
+        "extraction_source": "heuristic_enhanced" if (FALLBACK_USE_MARKET_SUPPLEMENT or FALLBACK_USE_STANCE_SUPPLEMENT) else "heuristic",
+    })
+    return base
+
+
+def extract_symbol(text: str, graph=None,
+                   llm_call: Optional[Callable[[str], str]] = None) -> Dict[str, Any]:
+    """부호 있는 target-aware stance 추출 (heuristic_extract_symbol 드롭인 상위집합).
+
+    llm_call(prompt)->str(JSON) 주입 시 LLM 경로, 미지정/실패 시 휴리스틱 폴백.
+    """
+    if not text:
+        return _heuristic_stance_fallback("", graph)
+    if llm_call is None:
+        return _heuristic_stance_fallback(text, graph)
+    try:
+        parsed = parse_stance_response(llm_call(build_stance_prompt(text)))
+    except Exception:
+        parsed = None
+    return parsed if parsed is not None else _heuristic_stance_fallback(text, graph)
+
+
+def compute_target_shift(prev: Dict[str, Any], curr: Dict[str, Any]) -> Dict[str, Any]:
+    """연속 기사 간 평가 대상/프레임 전환 진단 (점수 비반영, 해설/trace 전용)."""
+    p_pol = float(prev.get("stance_polarity", 0.0))
+    c_pol = float(curr.get("stance_polarity", 0.0))
+    sign_flip = (p_pol < -0.1 and c_pol > 0.1) or (p_pol > 0.1 and c_pol < -0.1)
+    target_changed = bool(prev.get("evaluation_target")) and \
+        prev.get("evaluation_target") != curr.get("evaluation_target")
+    scope_changed = prev.get("target_scope") != curr.get("target_scope")
+    note = []
+    if sign_flip:
+        note.append("부호 반전(입장/프레임 방향 전환)")
+    if target_changed or scope_changed:
+        note.append(f"평가 대상 전환({prev.get('target_scope')}→{curr.get('target_scope')})")
+    return {
+        "polarity_shift_abs": round(abs(c_pol - p_pol), 3),
+        "frame_reversal": sign_flip,
+        "target_changed": target_changed,
+        "scope_changed": scope_changed,
+        "from": {"target": prev.get("evaluation_target", ""), "scope": prev.get("target_scope", ""), "polarity": round(p_pol, 3)},
+        "to":   {"target": curr.get("evaluation_target", ""), "scope": curr.get("target_scope", ""), "polarity": round(c_pol, 3)},
+        "note": " · ".join(note) if note else "유의미한 대상/방향 전환 없음",
+    }
+
+
+def _extract_pair_symbols(past_text, present_text, graph, llm_call):
+    """extract_symbol(부호 있는 target-aware stance) 사용. 점수 공식 불변."""
+    _llm = llm_call if llm_call is not None else DEFAULT_STANCE_LLM
+    return (extract_symbol(past_text, graph, llm_call=_llm),
+            extract_symbol(present_text, graph, llm_call=_llm))
+
 def audit_temporal_pair(
     past_text: str,
     present_text: str,
     rules_data: Dict[str, Any],
     graph: Optional[rdflib.Graph] = None,
+    llm_call: Optional[Callable[[str], str]] = None,
 ) -> Dict[str, Any]:
     """과거-현재 두 텍스트를 OWL 그래프 + 1024 룰셋으로 비교 검증.
 
     axiom audit_logic의 4단계를 휴리스틱 추출 기반으로 재구성:
-      Stage 1: 휴리스틱 ExtractedSymbol (LLM 없이도 작동)
+      Stage 1: ExtractedSymbol (llm_call 주입 시 LLM stance, 아니면 휴리스틱)
       Stage 2: polarity_shift 연속 감점 (compute_temporal_shift_penalty)
       Stage 3: OWL 그래프 추론 (conflictsWith + reinforces + calibratesDimension)
       Stage 4: 1024 룰 매칭 + 연속 페널티 + dimension_breakdown 누적
 
+    llm_call: Callable[[str], str] | None. 미지정 시 DEFAULT_STANCE_LLM, 그것도 None이면 휴리스틱.
+
     Returns:
         audit_logic과 동일한 구조의 report dict
     """
-    past = heuristic_extract_symbol(past_text, graph)
-    present = heuristic_extract_symbol(present_text, graph)
+    past, present = _extract_pair_symbols(past_text, present_text, graph, llm_call)
 
     # JSON 룰셋에 없는 OWL-only 프레임은 graph audit의 fired_rules를 비우는 원인이 된다.
     # 따라서 런타임에서만 active frame으로 제한하고, OWL 파일 자체는 수정하지 않는다.
@@ -1236,6 +1490,7 @@ def audit_article_group(
     articles: List[Dict[str, Any]],
     rules_data: Dict[str, Any],
     graph: Optional[rdflib.Graph] = None,
+    llm_call: Optional[Callable[[str], str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """N개 기사 묶음에서 첫 기사 ↔ 마지막 기사를 audit_temporal_pair로 비교.
 
@@ -1248,7 +1503,7 @@ def audit_article_group(
     sorted_articles = sorted(articles, key=lambda a: parse_date(a.get("date") or a.get("published_at")))
     past_text = text_of(sorted_articles[0])
     present_text = text_of(sorted_articles[-1])
-    report = audit_temporal_pair(past_text, present_text, rules_data, graph=graph)
+    report = audit_temporal_pair(past_text, present_text, rules_data, graph=graph, llm_call=llm_call)
     report["past_article"] = {
         "title": sorted_articles[0].get("title", ""),
         "date": sorted_articles[0].get("date", ""),

@@ -558,3 +558,134 @@ def extract_features_with_sllm(
         "rag_min_dense_score": min_dense_score,
     }
     return features, meta
+
+
+# ── v2.4: target-aware stance LLM adapter ─────────────────────────────
+# rule_engine.extract_symbol()에 꽂을 Callable[[str], str] 팩토리.
+# 기존 Feature LLM / Dense-OpenAI 경로와 같은 OpenAI API Key를 재사용한다.
+def make_openai_stance_llm_call(
+    model: str = "gpt-4o-mini",
+    max_tokens: int = 512,
+    api_key: Optional[str] = None,
+    timeout: int = 60,
+):
+    """OpenAI Chat Completions 기반 stance JSON 추출 llm_call 생성.
+
+    반환값은 rule_engine.extract_symbol(text, llm_call=...)이 기대하는
+    llm_call(prompt: str) -> str 형태다. SDK를 추가하지 않고, 이 모듈에서 이미
+    사용하는 requests 기반 호출을 재사용한다.
+    """
+    def llm_call(prompt: str) -> str:
+        active_api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        if not active_api_key:
+            raise ValueError("OpenAI API Key가 설정되지 않았습니다.")
+        try:
+            import requests
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError("OpenAI stance LLM 호출에는 requests가 필요합니다.") from exc
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {active_api_key}",
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "너는 JSON만 출력하는 stance 추출기다. 마크다운/설명 금지."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=timeout,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"OpenAI stance LLM 호출 실패 (상태 코드 {response.status_code}): {response.text}")
+        data = response.json()
+        return data["choices"][0]["message"].get("content") or "{}"
+    return llm_call
+
+
+
+# ── v2.4.1: local sLLM stance adapter ────────────────────────────────
+def make_local_stance_llm_call(
+    model: str = DEFAULT_MODEL,
+    max_new_tokens: int = 512,
+    temperature: float = 0.0,
+    device: Optional[int] = None,
+):
+    """Hugging Face/local sLLM 기반 stance JSON 추출 llm_call 생성.
+
+    반환값은 rule_engine.extract_symbol(text, llm_call=...)이 기대하는
+    llm_call(prompt: str) -> str 형태다. 모델은 첫 호출 시점에 lazy load한다.
+
+    주의:
+    - Streamlit Cloud 기본 requirements에는 transformers/torch를 넣지 않는다.
+    - 로컬에서 쓰려면 requirements-sllm.txt를 설치하고 STREAMLIT_CLOUD=0으로 실행한다.
+    - 작은 모델은 JSON 형식 준수가 약할 수 있으므로, UI에서는 extraction_source를 반드시 확인한다.
+    """
+    pipe_cache: Dict[str, Any] = {"pipe": None}
+
+    def llm_call(prompt: str) -> str:
+        try:
+            from transformers import pipeline
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(
+                "로컬 stance sLLM을 사용하려면 transformers/torch가 필요합니다. "
+                "pip install -r requirements-sllm.txt 후 STREAMLIT_CLOUD=0으로 실행하세요."
+            ) from exc
+
+        if pipe_cache["pipe"] is None:
+            kwargs: Dict[str, Any] = {
+                "model": model,
+                "tokenizer": model,
+                "trust_remote_code": True,
+            }
+            if device is not None:
+                kwargs["device"] = device
+            pipe_cache["pipe"] = pipeline("text-generation", **kwargs)
+
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": temperature > 0,
+            "return_full_text": False,
+        }
+        if temperature > 0:
+            gen_kwargs["temperature"] = temperature
+        outputs = pipe_cache["pipe"](prompt, **gen_kwargs)
+        if not outputs:
+            return "{}"
+        return outputs[0].get("generated_text", "") or "{}"
+
+    return llm_call
+
+
+def make_stance_llm_call(
+    provider: str = "openai",
+    model: str = "gpt-4o-mini",
+    api_key: Optional[str] = None,
+    max_tokens: int = 512,
+    max_new_tokens: int = 512,
+    temperature: float = 0.0,
+):
+    """provider=openai|local 을 받아 stance llm_call을 만드는 통합 팩토리."""
+    provider_key = (provider or "").lower().strip()
+    if provider_key in {"openai", "gpt", "api"}:
+        return make_openai_stance_llm_call(model=model, max_tokens=max_tokens, api_key=api_key)
+    if provider_key in {"local", "sllm", "hf", "huggingface"}:
+        return make_local_stance_llm_call(model=model, max_new_tokens=max_new_tokens, temperature=temperature)
+    raise ValueError(f"지원하지 않는 stance provider입니다: {provider}")
+
+def with_cache(llm_call, maxsize: int = 512):
+    """동일 prompt 반복 호출 비용을 줄이는 작은 캐시 래퍼."""
+    from functools import lru_cache
+
+    @lru_cache(maxsize=maxsize)
+    def cached(prompt: str) -> str:
+        return llm_call(prompt)
+
+    return cached

@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!--
+  alignment_annotations.owl  (companion / additive)
+  ==================================================
+  원본 context_sync_app_centered_ontology_1024.owl 은 건드리지 않는다.
+  이 파일은 measuresDimension(작동축)과 calibratesDimension(규범축)의 의미 구분과,
+  둘이 의도적으로 갈라지는 4개 교차매핑 스키마(T03/T04/S05/M06)를 명시적으로 문서화하기 위한
+  rdfs:comment / 설명 어노테이션만 추가한다. 두 파일을 함께 로드하면 주석이 병합된다.
+-->
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns="http://www.context-sync.com/ontology/news-app#"
+    xml:base="http://www.context-sync.com/ontology/news-app">
+
+  <owl:Ontology rdf:about="http://www.context-sync.com/ontology/news-app/alignment-annotations">
+    <rdfs:comment xml:lang="ko">이중축(operational/normative) 차원 모델 설명용 어노테이션 보강 파일. 원본 온톨로지에 추가로 로드한다.</rdfs:comment>
+    <owl:imports rdf:resource="http://www.context-sync.com/ontology/news-app"/>
+  </owl:Ontology>
+
+  <!-- 작동축: 점수 계산에서 이 RuleSchema가 실제로 측정하는 차원 -->
+  <owl:ObjectProperty rdf:about="#measuresDimension">
+    <rdfs:label xml:lang="en">measures dimension (operational)</rdfs:label>
+    <rdfs:comment xml:lang="ko">operational dimension. 이 RuleSchema가 앱 점수 계산(rule_engine Stage 4)에서 실제로 측정·누적하는 작동 차원이다. JSON 룰의 rule.dimension 은 이 값과 항상 일치한다(불변식: rule.dimension == schema.measuresDimension).</rdfs:comment>
+  </owl:ObjectProperty>
+
+  <!-- 규범축: 이 ValueAnchor가 규범적으로 보정하는 차원 -->
+  <owl:ObjectProperty rdf:about="#calibratesDimension">
+    <rdfs:label xml:lang="en">calibrates dimension (normative)</rdfs:label>
+    <rdfs:comment xml:lang="ko">normative dimension. 이 ValueAnchor가 규범적으로 보정하는 평가 차원이다. rule_engine Stage 3(OWL 그래프 추론)에서 ValueAnchor 위반 페널티를 이 차원으로 분배한다. 작동축(measuresDimension)과 다를 수 있으며, 그 경우는 오류가 아니라 교차매핑(cross_mapping)이다.</rdfs:comment>
+  </owl:ObjectProperty>
+
+  <!-- 의도된 교차매핑 4개: measuresDimension(작동) != anchor.calibratesDimension(규범) -->
+  <owl:Class rdf:about="#schema_T03">
+    <rdfs:comment xml:lang="ko">교차매핑: 작동축=temporal_shift(시간축 왜곡으로 측정), 규범축=context_omission(훼손 가치는 ContextCompleteness). 의도된 이중축.</rdfs:comment>
+  </owl:Class>
+  <owl:Class rdf:about="#schema_T04">
+    <rdfs:comment xml:lang="ko">교차매핑: 작동축=temporal_shift, 규범축=context_omission(ContextCompleteness). 의도된 이중축.</rdfs:comment>
+  </owl:Class>
+  <owl:Class rdf:about="#schema_S05">
+    <rdfs:comment xml:lang="ko">교차매핑: 작동축=frame_effect(과대표집의 프레임 효과로 측정), 규범축=consensus_deviation(훼손 가치는 PluralPublicReason). 의도된 이중축.</rdfs:comment>
+  </owl:Class>
+  <owl:Class rdf:about="#schema_M06">
+    <rdfs:comment xml:lang="ko">교차매핑: 작동축=frame_effect(선제적 신뢰훼손의 프레임 효과로 측정), 규범축=consensus_deviation(훼손 가치는 PluralPublicReason). S05와 동일 구조 — v2.1.9에서 JSON dimension을 frame_effect로 통일해 S05와 일관성을 맞췄다.</rdfs:comment>
+  </owl:Class>
+
+</rdf:RDF>

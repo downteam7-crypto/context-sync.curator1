@@ -5,7 +5,11 @@
 **Live Demo**: <https://context-sync-curator1.streamlit.app/>  
 **GitHub Repository**: <https://github.com/downteam7-crypto/context-sync.curator1>
 
-**현재 버전: v2.2.1** (4단계 Streamlit — 기사 묶음 일괄 분석 + Cloud Dense-OpenAI RAG + Readability Patch) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/로드맵_3단계`](./legacy/로드맵_3단계/)에 보존
+**현재 버전: v2.3** (4단계 Streamlit — 기사 묶음 일괄 분석 + Cloud Dense-OpenAI RAG + Readability Patch + OWL–JSON Alignment Polish) · **Streamlit Community Cloud 2차 배포는 경량 모드** · 이전 3.5단계 Gradio Hybrid는 [`legacy/로드맵_3단계`](./legacy/로드맵_3단계/)에 보존
+
+> 버전 표기 기준: `v2.3`은 현재 앱/문서 릴리스 버전이다. `v2.1.9-owl-aligned`는 이 릴리스에 포함된 **룰셋 데이터셋 내부 버전**이며, 앱 버전과 별도 네임스페이스로 관리한다. Target-aware 논조 추출 방식은 아직 공식 릴리스에 포함하지 않은 후보 패치로 별도 관리한다.
+
+
 
 뉴스 기사 묶음의 시계열 논조 변화가 *맥락 정합성* 안에서 일관되는지, 아니면 *기준 이탈*인지를 다층적으로 평가하는 프로토타입.
 
@@ -34,8 +38,8 @@
 본 프로젝트의 부동성 기준층은 **3층 분리 구조**로 설계되어 있다.
 
 - **OWL 온톨로지** (`ontology/context_sync_app_centered_ontology_1024.owl`): 17개의 추상 스키마, 6개의 ValueAnchor, 4개의 AxiomLayer, 5개의 EvaluationDimension, 20개의 Frame, 18개의 Topic 등 **느리게 변하는 보편 어휘**와, 그 어휘 사이의 **그래프 관계**(`conflictsWith`, `reinforces`, `calibratesDimension`)를 정의한다.
-- **외부 룰셋** (`ontology/news_rules_1024.json`): 위 스키마에 속하는 **1024개의 실무 검출 규칙**을 별도 파일로 관리한다 (데이터셋 버전 `v2.1.6-five-level-verdict-consistent`).
-- **Python 계산 엔진** (`rule_engine.py`): OWL의 어휘 선언과 JSON의 규칙을 결합해 *실제 점수를 계산*한다.
+- **외부 룰셋** (`ontology/news_rules_1024.json`): 위 스키마에 속하는 **1024개의 실무 검출 규칙**을 별도 파일로 관리한다 (현재 앱 릴리스 `v2.3`에 포함된 룰셋 내부 버전: `v2.1.9-owl-aligned`). 이 룰셋에서 각 룰의 `dimension`을 OWL `RuleSchema.measuresDimension`(작동축)과 일치시키고(`M06 PreemptiveDiscrediting` 64개를 `consensus_deviation → frame_effect`로 정렬), 모든 룰에 `operational_dimension`·`normative_dimension`·`alignment_status` 메타데이터를 부착했다. 정합성은 `tools/validate_owl_json_alignment.py`로 검증한다.
+- **Python 계산 엔진** (`engine/rule_engine.py`): OWL의 어휘 선언과 JSON의 규칙을 결합해 *실제 점수를 계산*한다. 런타임 코드는 `engine/`에, 보정·검증 스크립트는 `tools/`에 분리한다.
 
 각 층의 책임이 다르다 — OWL은 *어휘와 관계*, JSON은 *실무 규칙*, Python은 *계산 실행*. 이 분리가 *"공리를 80개에서 800개로, 다시 1024개로 늘리면 정교해질까"*에 대한 응답이다.
 
@@ -61,6 +65,61 @@
 | `PluralPublicReason` | 단순 다수결이 아니라 다양한 의견이 *구조적*으로 반영되는 기준 | `consensus_deviation` |
 
 각 ValueAnchor의 `calibratesDimension` 매핑이 *Value 위반*이 *어느 점수 차원으로 반영되어야 하는가*를 그래프 추론으로 답한다.
+
+### operational / normative 이중축과 OWL–JSON 정합성 (v2.3)
+
+차원은 사실 **두 축**으로 존재한다. 이 구분이 OWL과 JSON이 일부 스키마에서 서로 다른 차원을 가리키는 이유다.
+
+| 축 | 정의 | OWL 관계 | 코드상 적용 위치 |
+|---|---|---|---|
+| **operational** (작동축) | 해당 프레임이 *실제 점수 계산에서 측정되는* 차원 | `RuleSchema.measuresDimension` | Stage 4 — JSON 룰의 `dimension` |
+| **normative** (규범축) | 해당 가치앵커가 *규범적으로 보정하는* 차원 | `ValueAnchor.calibratesDimension` | Stage 3 — OWL 그래프 추론 |
+
+JSON 룰의 `dimension`은 **항상 작동축(`measuresDimension`)을 따른다**(불변식: `rule.dimension == schema.measuresDimension`, 1024/1024). 규범축은 Stage 3에서 `calibratesDimension`으로 따로 분배되므로, 두 축이 분리되어 중복 적재되지 않는다.
+
+대부분 두 축은 일치하지만, 4개 스키마는 의도적으로 갈라진다(`alignment_status: cross_mapping`).
+
+| schema | frame | 작동축(`dimension`) | 규범축(anchor) | 의미 |
+|---|---|---|---|---|
+| `T03` | RetroactiveReframing | `temporal_shift` | `context_omission` (ContextCompleteness) | 시간축으로 측정되나 훼손 가치는 맥락 완성도 |
+| `T04` | SelectiveMemory | `temporal_shift` | `context_omission` (ContextCompleteness) | 〃 |
+| `S05` | OverSampling | `frame_effect` | `consensus_deviation` (PluralPublicReason) | 프레임 효과로 측정되나 훼손 가치는 공적 이성 |
+| `M06` | PreemptiveDiscrediting | `frame_effect` | `consensus_deviation` (PluralPublicReason) | 〃 (S05와 동일 규약으로 정렬) |
+
+이 교차는 *오류가 아니라 이중축 설계*다. `tools/validate_owl_json_alignment.py`는 모든 룰을 `aligned / cross_mapping / anchor_only_suspicious / suspicious`로 분류한다. `cross_mapping`은 JSON `dimension`이 OWL의 작동축에는 맞지만 규범축과 다른 의도된 교차 매핑이다. 반대로 `anchor_only_suspicious`는 JSON `dimension`이 규범축에는 맞지만 작동축에는 어긋나는 상태로, 원본 M06 문제가 여기에 해당한다. `anchor_only_suspicious` 또는 `suspicious`가 1건이라도 있으면 exit code 1로 실패한다(현재 `aligned 768 / cross_mapping 256 / anchor_only_suspicious 0 / suspicious 0`).
+
+### 후보 패치: Target-aware 논조 추출 방식 (미공식)
+
+이 절은 아직 공식 릴리스에 포함하지 않은 **후보 패치**를 기록한 것이다. 현재 공식 버전은 `v2.3`이며, 이 후보 패치는 점수 공식(`compute_temporal_shift_penalty`, `per_dim_cap`, `dimension_weights`, `frame_soft_cap`)을 바꾸지 않고 **Stage 1의 논조 추출층**만 보강하는 방향이다.
+
+기존 휴리스틱은 긍정/부정 cue 비율로 `stance_polarity`를 만들기 때문에, 고환율 사례처럼 표면 주제는 같지만 평가 대상이 `거시경제 리스크`에서 `수출주 수혜`로 바뀌는 경우를 약하게 잡을 수 있다. 후보 패치는 `stance_polarity`를 `evaluation_target` 기준의 signed stance로 추출해, 기존 `abs(past - present)` temporal 공식 안에 더 정확한 부호를 넣는 방식이다.
+
+후보 구조는 다음처럼 작동한다.
+
+```text
+휴리스틱(기본)             → 외부 LLM 없음, 기존 lexicon/cue 기반, 기본 점수 호환
+강화 휴리스틱(키워드 보강)  → 외부 LLM 없음, 도메인별 phrase cue 보조 반영, 점수 변동 가능
+OpenAI API                 → OpenAI가 evaluation_target 기준 signed stance JSON 추출
+Local sLLM                 → 로컬 Hugging Face 모델이 같은 JSON 스키마로 stance 추출
+```
+
+#### 휴리스틱과 LLM/sLLM의 경계
+
+- **기본 휴리스틱**: `engine.rule_engine.heuristic_extract_symbol()`과 기존 lexicon/cue만 사용한다. 외부 모델 호출이 없고, `DEFAULT_STANCE_LLM=None`, `FALLBACK_USE_STANCE_SUPPLEMENT=False` 상태다. 공식 v2.3 점수와의 호환성을 가장 강하게 보장한다.
+- **강화 휴리스틱**: 여전히 외부 LLM을 쓰지 않는다. 다만 `FALLBACK_USE_STANCE_SUPPLEMENT=True`로 두어 `수혜`, `환차익`, `무혐의`, `타결`, `에너지 안보 강화`, `학습권 보장` 같은 도메인별 phrase cue를 stance polarity 보조 계산에 반영한다. 이 모드는 오프라인/무료지만 기본 휴리스틱과 점수가 달라질 수 있으므로 회귀 비교용이다.
+- **OpenAI API / Local sLLM**: `engine/sllm_extractor.py`가 `llm_call(prompt)->JSON str` 형태의 어댑터를 만들고, `engine.rule_engine.DEFAULT_STANCE_LLM`에 연결한다. 이때 LLM은 `surface_topic`, `evaluation_target`, `target_scope`, `domain`, `stance_label`, `stance_polarity`, `risk_frame`, `benefit_frame` 등을 추출한다. 점수 공식은 그대로이며, LLM이 실패하면 휴리스틱 폴백으로 돌아간다.
+
+후보 패치의 도메인 메뉴는 21개로 확장된다.
+
+```text
+economy / finance / law / politics / diplomacy / security / labor / health /
+education / energy / environment / housing / welfare / culture / media /
+technology / science / transport / agriculture / society / other
+```
+
+도메인은 점수에 직접 들어가지 않는다. 다만 LLM이 `education`, `energy`, `culture` 같은 분야를 `society`나 `other`로 뭉개지 않게 하는 프롬프트 메뉴이자 검증 필터다. 겹치는 도메인은 평가 대상의 1차 분야를 따른다. 예를 들어 거시 집계는 `economy`, 시장·자산·기업실적은 `finance`, 에너지 수급·전기요금은 `energy`, 기후·오염·생태는 `environment`, 콘텐츠·예술은 `culture`, 언론·플랫폼·여론은 `media`로 분리한다.
+
+구현상 `stance_extractor.py`는 별도 파일로 두지 않고 `engine/rule_engine.py`에 흡수한다. LLM 호출 어댑터는 기존 `engine/sllm_extractor.py`에 흡수한다. 따라서 후보 패치의 실제 구동 파일은 `app.py`, `engine/rule_engine.py`, `engine/sllm_extractor.py` 세 개이며, `stance_extractor.py`와 `stance_llm.py`는 필요하지 않다.
 
 ### 5차원 평가와 dimension_weights (v2.0 baseline)
 
@@ -271,7 +330,7 @@ Cloud 배포판은 다음 기능을 우선 제공한다.
 
 - OWL 온톨로지 로드
 - 1024개 JSON 룰셋 로드
-- `rule_engine.py` 기반 5차원 정규화 점수 계산
+- `engine/rule_engine.py` 기반 5차원 정규화 점수 계산
 - frame-level soft cap + effective frame cap mitigation
 - Streamlit UI
 - URL/JSON/직접 입력 기반 기사 분석
@@ -319,6 +378,22 @@ Cloud에서 문제가 생기면 우선 다음을 확인한다.
 - `.streamlit/config.toml` 경로가 정확한지
 - API Key를 코드가 아니라 Secrets에 넣었는지
 
+
+## OWL–JSON 정합성 검사
+
+룰셋 또는 OWL을 수정한 뒤에는 커밋 전 다음 명령으로 작동축/규범축 정합성을 확인한다.
+
+```bash
+python tools/validate_owl_json_alignment.py ontology/news_rules_1024.json ontology/context_sync_app_centered_ontology_1024.owl
+```
+
+현재 룰셋처럼 모든 룰에 정합성 메타데이터가 있어야 한다는 조건까지 강제하려면 다음 옵션을 사용한다.
+
+```bash
+python tools/validate_owl_json_alignment.py --strict-metadata ontology/news_rules_1024.json ontology/context_sync_app_centered_ontology_1024.owl
+```
+
+정상 상태는 `aligned 768 / cross_mapping 256 / anchor_only_suspicious 0 / suspicious 0`이다. `cross_mapping`은 의도된 이중축 매핑이며, `anchor_only_suspicious` 또는 `suspicious`는 수정 대상이다.
 
 ## 설치 및 실행
 
@@ -434,47 +509,50 @@ Dense RAG를 켜면 한국어 임베딩 모델이 자동 다운로드될 수 있
 
 ## 폴더 구조
 
-```
+```text
 context-sync.curator1/
-├── README.md
-├── LICENSE
-├── requirements.txt                              ← Streamlit Cloud 경량 의존성
-├── requirements-sllm.txt                         ← 로컬 Dense RAG/sLLM 선택 의존성
-├── .streamlit/
-│   └── config.toml                               ← Cloud 테마/업로드 설정
-├── .gitignore
-├── .env.example
-├── app.py                                       ← Streamlit 메인 앱
-├── rule_engine.py                               ← axiom audit 엔진 (3층 분리의 계산 층)
-├── sllm_extractor.py                            ← LLM/sLLM 추출기 + Dense(ko-sroberta/OpenAI)/Sparse RAG
-├── tools/
-│   └── calibrate_min_dense_score.py             ← OpenAI Dense cutoff 진단·보정 도구 (측정용, 앱 자동반영 없음)
+├── app.py                                      ← Streamlit UI / Cloud 진입점
+├── engine/                                    ← 앱 구동 중 import되는 런타임 코드
+│   ├── __init__.py
+│   ├── rule_engine.py                         ← axiom audit 엔진 + graph audit + stance 후보 추출층
+│   └── sllm_extractor.py                      ← OpenAI/Local sLLM 추출기 + Dense/Sparse RAG
 ├── ontology/
 │   ├── context_sync_app_centered_ontology_1024.owl
-│   └── news_rules_1024.json
-├── docs/                                        ← 페르소나/컨텍스트 자료
-│   ├── 01_problem_framing.md
-│   ├── 02_cognition_and_metacognition.md
-│   ├── 03_hybrid_ontology.md
-│   └── 04_background.md
-├── legacy/로드맵_3단계
-│   └── v1.0-3.5stage/                           ← v1.0 ~ v1.2.2 Gradio Hybrid (보존)
-│       ├── README.md
-│       ├── axiom_tracker_hybrid.py
-│       ├── requirements.txt
-│       └── ontology/
-└── comparison/                                  ← Pure LLM 베이스라인 (비교용)
-    ├── README.md
-    └── axiom_tracker_pure_llm.py
+│   ├── news_rules_1024.json
+│   └── alignment_annotations.owl              ← 선택: OWL–JSON 이중축 설명용 어노테이션
+├── tools/                                     ← 일회성 진단·검증·보정 스크립트
+│   ├── calibrate_min_dense_score.py
+│   ├── validate_owl_json_alignment.py
+│   └── test_stance.py                         ← 선택: 후보 stance 추출층 smoke test
+├── docs/
+├── comparison/
+├── sample_data/
+├── legacy/로드맵_3단계/
+├── requirements.txt
+├── requirements-sllm.txt
+└── README.md
 ```
 
----
+`tools/`는 앱이 상시 import하는 런타임 모듈이 아니라, 검증·보정·회귀 테스트처럼 사용자가 필요할 때 실행하는 스크립트를 둔다. 따라서 `rule_engine.py`와 `sllm_extractor.py`는 `tools/`가 아니라 `engine/` 아래에 둔다. 이 구분은 `tools/calibrate_min_dense_score.py`처럼 앱 값을 측정·보정하는 스크립트와, 앱 실행 중 직접 호출되는 계산 엔진을 분리하기 위한 것이다.
 
 ## 변경 이력
 
 > **버전 체계 안내**: 4단계 Streamlit 분석 도구는 *3.5단계까지의 Gradio Hybrid(legacy v1.x)와 별개의 메이저 라인*으로, **v2.0부터 새로 시작**한다. 즉 *4단계 진입 = v2.0*. legacy의 v1.0~v1.2.2는 `legacy/로드맵_3단계/`에 보존된다. (룰셋/OWL 데이터셋 내부 버전인 `v2.1.6-...`은 *데이터셋 자체의 일련 번호*이며 앱 버전과 별개 네임스페이스다.)
 
-### v2.2.1 (현재) — Readability Patch: Executive Summary + compact audit UI
+### v2.3 (현재) — Readability + OWL–JSON Alignment Polish
+
+v2.3은 v2.2.1의 결과 가독성 패치와 룰셋 내부 버전 `v2.1.9-owl-aligned`의 OWL–JSON 정합성 정리를 하나의 현재 릴리스로 묶은 버전이다. 사용자에게 보이는 앱/문서 버전은 `v2.3`으로 통일하고, 룰셋 데이터셋 내부 버전은 필요한 곳에서만 별도 표기한다.
+
+> **변경 범위 (3층 분리 관점)**: 앱 렌더링/문서화/룰셋 메타데이터를 정리한다. 5차원 점수 공식, `per_dim_cap=45`, frame-level soft cap, explanation mitigation, activation 로직은 변경하지 않는다. v2.1.10에서 검토했던 activation floor는 채택하지 않고 별도 실험 브랜치로 보류한다.
+
+- **Readability Patch 포함**: Executive Summary, 대표 audit 선택 안정화, 차원별 기여도 정렬, OWL Reasoning Trace 요약화, actual fired_rules 프레임 단위 집계 등 v2.2.1의 compact audit UI를 현재 릴리스에 포함한다.
+- **M06 정렬 포함**: `PreemptiveDiscrediting` 64개 룰의 `dimension`을 OWL `RuleSchema.measuresDimension` 작동축에 맞춰 `consensus_deviation → frame_effect`로 정렬했다.
+- **이중축 메타데이터 부착**: 전 룰에 `operational_dimension`, `normative_dimension`, `dimension_basis`, `alignment_status`를 추가했다.
+- **validator 정리**: `tools/validate_owl_json_alignment.py`가 `aligned / cross_mapping / anchor_only_suspicious / suspicious`를 분리하고, `--strict-metadata` 옵션으로 룰셋 메타데이터 누락까지 검사한다.
+- **검증 결과**: 현재 룰셋은 `aligned 768 / cross_mapping 256 / anchor_only_suspicious 0 / suspicious 0` 상태를 통과한다.
+- **scoring 로직 유지**: activation floor 등 점수 로직 변경은 적용하지 않는다. 비시계열 프레임 과소평가 문제는 별도 실험 브랜치에서 검토한다.
+
+### v2.2.1 — Readability Patch: Executive Summary + compact audit UI
 
 v2.2.1은 v2.2의 Cloud Dense-OpenAI RAG 구조와 v2.1의 점수·판정 구조를 유지한 상태에서, **분석 결과를 사람이 더 빨리 읽을 수 있도록 정리한 UI/가독성 패치**다.
 
@@ -493,7 +571,7 @@ v2.2.1은 v2.2의 Cloud Dense-OpenAI RAG 구조와 v2.1의 점수·판정 구조
 
 v2.2는 v2.1의 판정 구조를 유지한 상태에서, **Cloud 배포 환경의 RAG 근거 탐색을 보강한 버전**이다. v2.1이 *점수·판정 구조 정교화*라면, v2.2는 *Cloud/Local Dense 엔진 분리와 OpenAI 임베딩 기반 RAG 확장*에 초점을 둔다.
 
-> **변경 범위 (3층 분리 관점)**: v2.2는 OWL 어휘·1024 룰셋·5차원 점수 계산식(OWL/JSON 점수층)을 *변경하지 않는다*. 변경은 RAG 근거 탐색과 Cloud 배포 인프라(앱/추출기 층, `app.py`·`sllm_extractor.py`)에 한정된다. 즉 *판정 사상은 불변, 근거 탐색 인프라만 보강*한 버전이다. 동일 입력의 5차원 점수·verdict는 RAG 엔진과 무관하게 유지되며, 다만 LLM 추출 ON 시 프롬프트에 주입되는 RAG 후보가 엔진(Sparse / ko-sroberta / OpenAI)에 따라 달라져 feature 추출 결과가 달라질 수 있다.
+> **변경 범위 (3층 분리 관점)**: v2.2는 OWL 어휘·1024 룰셋·5차원 점수 계산식(OWL/JSON 점수층)을 *변경하지 않는다*. 변경은 RAG 근거 탐색과 Cloud 배포 인프라(앱/추출기 층, `app.py`·`engine/sllm_extractor.py`)에 한정된다. 즉 *판정 사상은 불변, 근거 탐색 인프라만 보강*한 버전이다. 동일 입력의 5차원 점수·verdict는 RAG 엔진과 무관하게 유지되며, 다만 LLM 추출 ON 시 프롬프트에 주입되는 RAG 후보가 엔진(Sparse / ko-sroberta / OpenAI)에 따라 달라져 feature 추출 결과가 달라질 수 있다.
 
 - **Cloud Dense-OpenAI RAG 도입**: Cloud 배포판에서 OpenAI API Key가 있으면 `text-embedding-3-small` 임베딩으로 Dense RAG를 수행한다. 기존 Cloud의 Sparse-only 한계를 줄이고, Sparse + Dense-OpenAI 병렬 비교를 제공한다.
 - **`compare_rag_results`·`search_relevant_rules` 양쪽에 OpenAI Dense 경로 추가**: Evidence Panel의 Dense 비교뿐 아니라, LLM feature 추출 프롬프트에 주입되는 RAG 후보 규칙도 Cloud에서는 OpenAI Dense를 사용할 수 있다.
@@ -588,12 +666,13 @@ OWL + JSON + Python 3축 구조의 초기 구현. 과거/현재 두 텍스트의
   - `sync_frames_with_rules` 런타임 동기화
   - JSON + OWL + Python 3층 동시 갱신 + ValueAnchor↔dimension 매핑 정합성 정리
 
-- [x] **4단계 — 기사 묶음 일괄 분석 (Streamlit, v2.0 ~ v2.2.1)**
+- [x] **4단계 — 기사 묶음 일괄 분석 (Streamlit, v2.0 ~ v2.3)**
   - 5차원 지표 + 1024 룰 + Plotly 시계열 sentiment 그래프 + 변곡점 마커 + RuleSchema 히트맵
   - RAG Evidence Panel (Sparse + Dense 병렬 비교). Dense 엔진은 환경별 이원화 — Cloud는 OpenAI 임베딩(`text-embedding-3-small`, 키 필요), 로컬 고급 모드는 ko-sroberta. cutoff 슬라이더 + `tools/calibrate_min_dense_score.py` 보정 도구
   - 수동 시뮬레이터 (5features + 5weights + 5프리셋)
   - OWL 계층 시각화 (Mermaid) + Reasoning Trace Table
   - Executive Summary + compact audit UI: 대표 변곡 구간, frame-level fired_rules 요약, trace 접힘 처리, candidate_rules 분리 표시
+  - v2.3 OWL–JSON Alignment Polish: M06 작동축 정렬, operational/normative 메타데이터, validator strict metadata 검사
   - baseline 복귀 (0.34/cap 45) + explanation mitigation 통합
   - 5단계 verdict 농도 모델 (안정적 정합 → 기준 이탈)
   - 제목·부제 가중치 (title 1.5 / subtitle 1.25 / body 1.0) + URL 자동 추출
@@ -601,6 +680,9 @@ OWL + JSON + Python 3축 구조의 초기 구현. 과거/현재 두 텍스트의
 - [ ] **5단계 — 사회적 의미 프록시의 실측 보정 (방향 초안)**
 
   > 5단계는 *완성형*이 아니라 *실측 기반 보정 단계*다. **이 시스템은 5천만 국민 전체의 집단지성을 직접 대표한다고 주장하지 않는다.** 대신 공개 기사 데이터, 매체 간 비교, 사용자 라벨링, 댓글·반응 신호, 언론윤리 기준, 심의 사례 등을 활용하여 *사회적 의미 기준을 근사하는 프록시(proxy)*를 점진적으로 보정한다. 즉 *"집단지성 구현"*이 아니라 *"집단지성의 관찰 가능한 흔적을 체계적으로 반영"*하는 단계다.
+
+  후보 기능(공식 미반영):
+  - **Target-aware stance extraction** — `stance_polarity`를 단순 긍정/부정 cue 비율이 아니라 `evaluation_target` 기준의 signed stance로 추출하는 실험. OpenAI API와 Local sLLM 양쪽을 지원하는 후보 패치가 있으나, 공식 현재 버전에는 포함하지 않고 실측 회귀 후 채택 여부를 결정한다.
 
   개발 우선순위 (현실적 순서):
   - **(1) 실험 데이터셋 구축** — 같은 사건에 대한 기사 20~50개 수집 + `issue_id`로 묶기 + 사람 라벨링 (frame_effect / context_omission / victim_blaming / overall_verdict)
