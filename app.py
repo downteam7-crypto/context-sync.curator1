@@ -2653,19 +2653,22 @@ with tab4:
     st.subheader("LLM (GPT/sLLM) 연결 방식")
     st.write("이 앱은 기본적으로 휴리스틱 추출기로 바로 실행되고, 선택적으로 OpenAI GPT 모델 또는 Hugging Face 기반 로컬/오픈소스 sLLM 추출기를 활성화할 수 있습니다.")
     st.code(
-        """# 기본 실행 및 GPT 이용 (필요시 openai 설치 및 API 키 설정 필요)
+        """# 기본 실행 / Streamlit Community Cloud와 동일한 경량 모드
 pip install -r requirements.txt
 streamlit run app.py
 
-# 로컬/오픈소스 sLLM 모드까지 사용
+# 로컬/오픈소스 sLLM + ko-sroberta Dense RAG까지 사용 (macOS/Linux)
 pip install -r requirements-sllm.txt
-streamlit run app.py
+STREAMLIT_CLOUD=0 streamlit run app.py
+
+# Windows PowerShell 예시
+# $env:STREAMLIT_CLOUD="0"; streamlit run app.py
 """,
         language="bash",
     )
     st.write("로컬 sLLM 모델 가중치는 GitHub 저장소에 포함하지 않으며, 첫 실행 때 Hugging Face 캐시에 다운로드됩니다.")
     st.write("기본 로컬 모델명은 `Qwen/Qwen2.5-0.5B-Instruct`이며, OpenAI GPT 모델(예: `gpt-4o`, `gpt-4-turbo`) 등도 연동하여 사용할 수 있습니다.")
-    st.warning("Streamlit Community Cloud 무료 환경 등에서는 로컬 sLLM 연동 시 메모리 한계나 실행 지연이 있을 수 있으므로 GPT API를 사용하거나 Ollama, HF Inference API 등 외부 API로 위임하는 것을 권장합니다.")
+    st.warning("Streamlit Community Cloud에서는 로컬 sLLM/ko-sroberta 경로를 기본 비활성화하고, OpenAI API 또는 Sparse/Cloud-friendly 경로를 사용합니다. 로컬 고급 기능은 STREAMLIT_CLOUD=0 환경에서 실행하세요.")
 
 with tab5:
     st.subheader("GitHub / Streamlit Cloud 배포 구조")

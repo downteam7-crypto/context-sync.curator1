@@ -85,6 +85,39 @@ else:
     DEFAULT_MODEL = "gpt-4o-mini"
 
 
+_GLOBAL_PIPELINE_CACHE = {}
+
+def get_cached_pipeline(model_name: str, device: Optional[int] = None):
+    cache_key = (model_name, device)
+    if cache_key not in _GLOBAL_PIPELINE_CACHE:
+        from transformers import pipeline
+        kwargs = {
+            "model": model_name,
+            "tokenizer": model_name,
+            "trust_remote_code": True,
+        }
+        if device is not None:
+            kwargs["device"] = device
+        _GLOBAL_PIPELINE_CACHE[cache_key] = pipeline("text-generation", **kwargs)
+    return _GLOBAL_PIPELINE_CACHE[cache_key]
+
+
+def clear_pipeline_cache() -> None:
+    """Clear cached local Hugging Face pipelines.
+
+    Useful when switching models repeatedly during local experiments.
+    It is intentionally not called by the app in normal operation, because
+    keeping the model in memory is what makes local sLLM inference responsive.
+    """
+    _GLOBAL_PIPELINE_CACHE.clear()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def is_cloud_mode() -> bool:
     """Return True when running in the Streamlit Community Cloud profile.
 
@@ -454,7 +487,6 @@ def extract_features_with_sllm(
     is_openai = model_name.lower().startswith("gpt-") or "gpt" in model_name.lower()
 
     if is_openai:
-        import os
         active_api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not active_api_key:
             raise ValueError(
@@ -497,7 +529,7 @@ def extract_features_with_sllm(
         raw = res_json["choices"][0]["message"]["content"]
     else:
         try:
-            from transformers import pipeline
+            generator = get_cached_pipeline(model_name)
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 "로컬 sLLM 모드를 사용하려면 transformers/torch가 필요합니다. "
@@ -505,19 +537,15 @@ def extract_features_with_sllm(
                 "또는 로컬 sLLM을 쓰시려면 pip install -r requirements-sllm.txt 를 실행하세요."
             ) from e
 
-        generator = pipeline(
-            "text-generation",
-            model=model_name,
-            tokenizer=model_name,
-            trust_remote_code=True,
-        )
-        outputs = generator(
-            prompt,
-            max_new_tokens=max_new_tokens,
-            do_sample=temperature > 0,
-            temperature=temperature if temperature > 0 else None,
-            return_full_text=False,
-        )
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": temperature > 0,
+            "return_full_text": False,
+        }
+        if temperature > 0:
+            gen_kwargs["temperature"] = temperature
+
+        outputs = generator(prompt, **gen_kwargs)
         raw = outputs[0].get("generated_text", "") if outputs else ""
 
     try:
@@ -628,26 +656,14 @@ def make_local_stance_llm_call(
     - 로컬에서 쓰려면 requirements-sllm.txt를 설치하고 STREAMLIT_CLOUD=0으로 실행한다.
     - 작은 모델은 JSON 형식 준수가 약할 수 있으므로, UI에서는 extraction_source를 반드시 확인한다.
     """
-    pipe_cache: Dict[str, Any] = {"pipe": None}
-
     def llm_call(prompt: str) -> str:
         try:
-            from transformers import pipeline
+            pipe = get_cached_pipeline(model, device=device)
         except Exception as exc:  # pragma: no cover
             raise RuntimeError(
                 "로컬 stance sLLM을 사용하려면 transformers/torch가 필요합니다. "
                 "pip install -r requirements-sllm.txt 후 STREAMLIT_CLOUD=0으로 실행하세요."
             ) from exc
-
-        if pipe_cache["pipe"] is None:
-            kwargs: Dict[str, Any] = {
-                "model": model,
-                "tokenizer": model,
-                "trust_remote_code": True,
-            }
-            if device is not None:
-                kwargs["device"] = device
-            pipe_cache["pipe"] = pipeline("text-generation", **kwargs)
 
         gen_kwargs: Dict[str, Any] = {
             "max_new_tokens": max_new_tokens,
@@ -656,7 +672,7 @@ def make_local_stance_llm_call(
         }
         if temperature > 0:
             gen_kwargs["temperature"] = temperature
-        outputs = pipe_cache["pipe"](prompt, **gen_kwargs)
+        outputs = pipe(prompt, **gen_kwargs)
         if not outputs:
             return "{}"
         return outputs[0].get("generated_text", "") or "{}"
